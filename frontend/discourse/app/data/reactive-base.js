@@ -59,6 +59,22 @@ export default class WarpRestModel {
     return this.#resource;
   }
 
+  // Ember-style dotted-path getter for backward compatibility with callers
+  // that still use `record.get("foo.bar")` instead of property access.
+  get(path) {
+    if (typeof path !== "string") {
+      return undefined;
+    }
+    let value = this;
+    for (const key of path.split(".")) {
+      if (value == null) {
+        return undefined;
+      }
+      value = value[key];
+    }
+    return value;
+  }
+
   save() {
     throw new Error(
       `${this.constructor.name}#save is not yet migrated to WarpDrive`
