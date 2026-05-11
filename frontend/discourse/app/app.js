@@ -4,6 +4,7 @@ import "decorator-transforms/globals";
 import "./loader-shims";
 import "./discourse-common-loader-shims";
 import "./global-compat";
+import "@warp-drive/ember/install";
 import dialogHolderCompatModules from "discourse/dialog-holder/dialog-holder-compat-modules";
 import floatKitCompatModules from "discourse/float-kit/float-kit-compat-modules";
 import selectKitCompatModules from "discourse/select-kit/select-kit-compat-modules";

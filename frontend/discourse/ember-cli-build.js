@@ -8,6 +8,7 @@ const funnel = require("broccoli-funnel");
 const DeprecationSilencer = require("deprecation-silencer");
 const { compatBuild } = require("@embroider/compat");
 const { Webpack } = require("@embroider/webpack");
+const { setConfig: setWarpDriveConfig } = require("@warp-drive/build-config");
 const { StatsWriterPlugin } = require("webpack-stats-plugin");
 const { RetryChunkLoadPlugin } = require("webpack-retry-chunk-load-plugin");
 const withSideWatch = require("./lib/with-side-watch");
@@ -116,6 +117,8 @@ module.exports = function (defaults) {
       ),
     },
   });
+
+  setWarpDriveConfig(app, __dirname, {});
 
   // WARNING: We should only import scripts here if they are not in NPM.
   app.import(discourseRoot + "/frontend/polyfills.js");
