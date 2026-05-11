@@ -14,6 +14,15 @@ const BADGE_ATTRIBUTE_KEYS = [
   "multiple_grant",
   "manually_grantable",
   "system",
+  // AdminBadgeSerializer attributes; absent from public responses, copied
+  // through when present.
+  "query",
+  "trigger",
+  "target_posts",
+  "auto_revoke",
+  "show_posts",
+  "i18n_name",
+  "image_upload_id",
 ];
 
 function pickAttributes(raw, keys) {

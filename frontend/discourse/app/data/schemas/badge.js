@@ -18,6 +18,15 @@ export const BadgeSchema = withDefaults({
     { kind: "field", name: "multiple_grant" },
     { kind: "field", name: "manually_grantable" },
     { kind: "field", name: "system" },
+    // Admin-only attributes (AdminBadgeSerializer). Always declared so the
+    // cache preserves them when an admin payload arrives.
+    { kind: "field", name: "query" },
+    { kind: "field", name: "trigger" },
+    { kind: "field", name: "target_posts" },
+    { kind: "field", name: "auto_revoke" },
+    { kind: "field", name: "show_posts" },
+    { kind: "field", name: "i18n_name" },
+    { kind: "field", name: "image_upload_id" },
     {
       kind: "belongsTo",
       name: "badge_type",

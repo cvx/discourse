@@ -3,7 +3,7 @@ import { ajax } from "discourse/lib/ajax";
 const discourseRestHandler = {
   async request(context, next) {
     const request = context.request;
-    if (!request.normalize) {
+    if (!request.url) {
       return next(request);
     }
 
@@ -13,7 +13,7 @@ const discourseRestHandler = {
     }
 
     const raw = await ajax(request.url, ajaxOptions);
-    return { content: request.normalize(raw) };
+    return { content: request.normalize ? request.normalize(raw) : raw };
   },
 };
 

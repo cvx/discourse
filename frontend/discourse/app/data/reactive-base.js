@@ -75,22 +75,34 @@ export default class WarpRestModel {
     return value;
   }
 
-  save() {
-    throw new Error(
-      `${this.constructor.name}#save is not yet migrated to WarpDrive`
-    );
+  async save(data) {
+    const Klass = this.constructor;
+    const store = warpStoreFor(Klass);
+    const result = await store.request(Klass.builders.save(this, data));
+
+    // The CacheHandler has already ingested the normalized response. For a
+    // draft that didn't have an id, the wrapper's `__resource` is still the
+    // plain attrs bag — swap it to the cached record so subsequent reads go
+    // through the cache.
+    const doc = result.content;
+    const id = doc?.data?.id;
+    if (id != null) {
+      const cached = store.peekRecord({ type: Klass.type, id });
+      if (cached && cached !== this.#resource) {
+        this.#resource = cached;
+      }
+    }
+    return this;
   }
 
-  destroy() {
-    throw new Error(
-      `${this.constructor.name}#destroy is not yet migrated to WarpDrive`
-    );
-  }
-
-  updateFromJson() {
-    throw new Error(
-      `${this.constructor.name}#updateFromJson is not yet migrated to WarpDrive`
-    );
+  async destroy() {
+    const Klass = this.constructor;
+    const id = this.id;
+    if (id == null) {
+      return;
+    }
+    const store = warpStoreFor(Klass);
+    await store.request(Klass.builders.delete(id));
   }
 }
 

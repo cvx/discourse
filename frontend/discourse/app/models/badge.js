@@ -1,4 +1,9 @@
-import { findBadge, findBadges } from "discourse/data/builders/badges";
+import {
+  deleteBadge,
+  findBadge,
+  findBadges,
+  saveBadge,
+} from "discourse/data/builders/badges";
 import { normalizeBadgesPayload } from "discourse/data/normalize";
 import WarpRestModel, {
   defineFieldForwarders,
@@ -9,14 +14,24 @@ import getURL from "discourse/lib/get-url";
 export default class Badge extends WarpRestModel {
   static type = "badge";
   static normalize = normalizeBadgesPayload;
-  static builders = { list: findBadges, one: findBadge };
+  static builders = {
+    list: findBadges,
+    one: findBadge,
+    save: saveBadge,
+    delete: deleteBadge,
+  };
 
+  // For cached records, the relation comes back through the belongsTo on the
+  // ReactiveResource (`badge_type.id`). For drafts created via `Badge.create`
+  // the attrs bag holds `badge_type_id` directly. Support both.
   get badge_type_id() {
-    return this.__resource.badge_type?.id;
+    return this.__resource.badge_type_id ?? this.__resource.badge_type?.id;
   }
 
   get badge_grouping_id() {
-    return this.__resource.badge_grouping?.id;
+    return (
+      this.__resource.badge_grouping_id ?? this.__resource.badge_grouping?.id
+    );
   }
 
   get url() {
