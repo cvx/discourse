@@ -77,3 +77,30 @@ export default class WarpRestModel {
     );
   }
 }
+
+// Define getters on Klass.prototype for each schema field (and the identity key),
+// each delegating to `this.__resource[name]`. Explicit getters declared in the
+// subclass body are preserved (they show up as own props on the prototype).
+export function defineFieldForwarders(Klass, schema) {
+  const proto = Klass.prototype;
+  const names = new Set();
+  if (schema.identity?.name) {
+    names.add(schema.identity.name);
+  }
+  for (const field of schema.fields ?? []) {
+    if (field.name) {
+      names.add(field.name);
+    }
+  }
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(proto, name)) {
+      continue;
+    }
+    Object.defineProperty(proto, name, {
+      configurable: true,
+      get() {
+        return this.__resource[name];
+      },
+    });
+  }
+}
