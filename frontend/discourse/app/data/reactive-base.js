@@ -75,6 +75,19 @@ export default class WarpRestModel {
     return value;
   }
 
+  // Ember-style multi-key getter. Accepts varargs or a single array, matching
+  // `@ember/object#getProperties`. Used by route `serialize()` and similar.
+  getProperties(...keys) {
+    if (keys.length === 1 && Array.isArray(keys[0])) {
+      keys = keys[0];
+    }
+    const out = {};
+    for (const key of keys) {
+      out[key] = this.get(key);
+    }
+    return out;
+  }
+
   async save(data) {
     const Klass = this.constructor;
     const store = warpStoreFor(Klass);

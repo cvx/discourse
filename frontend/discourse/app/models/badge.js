@@ -34,6 +34,12 @@ export default class Badge extends WarpRestModel {
     );
   }
 
+  // The `icon-or-image` helper reads `badge.image` and prefers it over `icon`
+  // when present. Preserved as a read-only alias for `image_url`.
+  get image() {
+    return this.image_url;
+  }
+
   get url() {
     return getURL(`/badges/${this.id}/${this.slug}`);
   }
