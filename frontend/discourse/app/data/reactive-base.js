@@ -1,7 +1,7 @@
 import { getOwnerWithFallback } from "discourse/lib/get-owner";
 
-function warpStoreFor(klass) {
-  const owner = klass.__owner ?? getOwnerWithFallback();
+export function warpStoreFor(klass) {
+  const owner = klass?.__owner ?? getOwnerWithFallback();
   return owner.lookup("service:warp-store");
 }
 

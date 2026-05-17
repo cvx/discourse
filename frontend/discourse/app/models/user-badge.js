@@ -1,168 +1,134 @@
-import EmberObject, { computed } from "@ember/object";
-import { Promise } from "rsvp";
-import { ajax } from "discourse/lib/ajax";
+import {
+  deleteUserBadge,
+  findUserBadgesByBadgeId,
+  findUserBadgesByUsername,
+  grantUserBadge,
+  toggleFavoriteUserBadge,
+} from "discourse/data/builders/user-badges";
+import { normalizeUserBadgesPayload } from "discourse/data/normalize";
+import WarpRestModel, {
+  defineFieldForwarders,
+  warpStoreFor,
+} from "discourse/data/reactive-base";
+import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import Badge from "discourse/models/badge";
-import Topic from "discourse/models/topic";
-import User from "discourse/models/user";
 
-export default class UserBadge extends EmberObject {
+// Attaches the per-document `grant_count` / `username` from a normalized
+// user-badges response onto the returned wrapper array. Preserves the legacy
+// shape where callers read these off the result of findByBadgeId.
+function withMeta(wrappers, meta) {
+  if (meta) {
+    wrappers.grant_count = meta.grant_count;
+    wrappers.username = meta.username;
+  }
+  return wrappers;
+}
+
+export default class UserBadge extends WarpRestModel {
+  static type = "user-badge";
+  static normalize = normalizeUserBadgesPayload;
+  static builders = { delete: deleteUserBadge };
+
+  // Overrides the base shim only to surface `grant_count` / `username` from
+  // /user_badges responses (`user_badge_info` wrapper), which legacy callers
+  // read off the returned array.
   static createFromJson(json) {
-    // Create User objects.
-    if (json.users === undefined) {
-      json.users = [];
-    }
-    let users = {};
-    json.users.forEach(function (userJson) {
-      users[userJson.id] = User.create(userJson);
-    });
+    const store = warpStoreFor(this);
+    const document = normalizeUserBadgesPayload(json);
 
-    json.granted_bies = json.granted_bies ?? [];
-    json.granted_bies.forEach(function (userJson) {
-      users[userJson.id] = User.create(userJson);
-    });
-
-    // Create Topic objects.
-    if (json.topics === undefined) {
-      json.topics = [];
-    }
-    let topics = {};
-    json.topics.forEach(function (topicJson) {
-      topics[topicJson.id] = Topic.create(topicJson);
-    });
-
-    // Create the badges.
-    if (json.badges === undefined) {
-      json.badges = [];
-    }
-    let badges = {};
-    Badge.createFromJson(json).forEach(function (badge) {
-      badges[badge.get("id")] = badge;
-    });
-
-    // Create UserBadge object(s).
-    let userBadges = [];
-    if ("user_badge" in json) {
-      userBadges = [json.user_badge];
-    } else {
-      userBadges =
-        (json.user_badge_info && json.user_badge_info.user_badges) ||
-        json.user_badges;
+    if (Array.isArray(document.data)) {
+      const records = store.push(document);
+      return withMeta(
+        records.map((r) => new this(r)),
+        document.meta
+      );
     }
 
-    userBadges = userBadges.map(function (userBadgeJson) {
-      let userBadge = UserBadge.create(userBadgeJson);
-
-      let grantedAtDate = Date.parse(userBadge.get("granted_at"));
-      userBadge.set("grantedAt", grantedAtDate);
-
-      userBadge.set("badge", badges[userBadge.get("badge_id")]);
-      if (userBadge.get("user_id")) {
-        userBadge.set("user", users[userBadge.get("user_id")]);
-      }
-      if (userBadge.get("granted_by_id")) {
-        userBadge.set("granted_by", users[userBadge.get("granted_by_id")]);
-      }
-      if (userBadge.get("topic_id")) {
-        userBadge.set("topic", topics[userBadge.get("topic_id")]);
-      }
-      return userBadge;
-    });
-
-    if ("user_badge" in json) {
-      return userBadges[0];
-    } else {
-      if (json.user_badge_info) {
-        userBadges.grant_count = json.user_badge_info.grant_count;
-        userBadges.username = json.user_badge_info.username;
-      }
-      return userBadges;
-    }
+    return new this(store.push(document));
   }
 
-  /**
-    Find all badges for a given username.
-
-    @method findByUsername
-    @param {String} username
-    @param {Object} options
-    @returns {Promise} a promise that resolves to an array of `UserBadge`.
-  **/
-  static findByUsername(username, options) {
+  static async findByUsername(username, options = {}) {
     if (!username) {
-      return Promise.resolve([]);
+      return [];
     }
-    let url = "/user-badges/" + username + ".json";
-    if (options && options.grouped) {
-      url += "?grouped=true";
-    }
-    return ajax(url).then(function (json) {
-      return UserBadge.createFromJson(json);
-    });
+    const store = warpStoreFor(this);
+    const result = await store.request(
+      findUserBadgesByUsername(username, options)
+    );
+    const data = result.content?.data ?? [];
+    return data.map((resource) => new this(resource));
   }
 
-  /**
-    Find all badge grants for a given badge ID.
-
-    @method findById
-    @param {String} badgeId
-    @returns {Promise} a promise that resolves to an array of `UserBadge`.
-  **/
-  static findByBadgeId(badgeId, options) {
-    if (!options) {
-      options = {};
-    }
-    options.badge_id = badgeId;
-
-    return ajax("/user_badges.json", {
-      data: options,
-    }).then(function (json) {
-      return UserBadge.createFromJson(json);
-    });
+  static async findByBadgeId(badgeId, options = {}) {
+    const store = warpStoreFor(this);
+    const result = await store.request(
+      findUserBadgesByBadgeId(badgeId, options)
+    );
+    const doc = result.content;
+    return withMeta(
+      (doc?.data ?? []).map((resource) => new this(resource)),
+      doc?.meta
+    );
   }
 
-  /**
-    Grant the badge having id `badgeId` to the user identified by `username`.
-
-    @method grant
-    @param {Integer} badgeId id of the badge to be granted.
-    @param {String} username username of the user to be granted the badge.
-    @returns {Promise} a promise that resolves to an instance of `UserBadge`.
-  **/
-  static grant(badgeId, username, reason) {
-    return ajax("/user_badges", {
-      type: "POST",
-      data: {
-        username,
-        badge_id: badgeId,
-        reason,
-      },
-    }).then(function (json) {
-      return UserBadge.createFromJson(json);
-    });
+  static async grant(badgeId, username, reason) {
+    const store = warpStoreFor(this);
+    const result = await store.request(
+      grantUserBadge(badgeId, username, reason)
+    );
+    return new this(result.content?.data);
   }
 
-  @computed
+  // `badge` derived getters (url, badgeTypeClassName, image, newBadge) live
+  // on the Badge wrapper class, not the cached ReactiveResource. Wrap here so
+  // `userBadge.badge.url` etc. keep working at consumer sites.
+  get badge() {
+    const resource = this.__resource.badge;
+    return resource ? new Badge(resource) : undefined;
+  }
+
+  // Number of milliseconds since epoch, parsed lazily from the granted_at
+  // string. Matches the previous EmberObject's `grantedAt` slot.
+  get grantedAt() {
+    const raw = this.granted_at;
+    return raw ? Date.parse(raw) : null;
+  }
+
   get postUrl() {
     if (this.topic_title) {
-      return "/t/-/" + this.topic_id + "/" + this.post_number;
+      return `/t/-/${this.topic_id}/${this.post_number}`;
     }
-  } // avoid the extra bindings for now
+    return undefined;
+  }
 
   revoke() {
-    return ajax("/user_badges/" + this.id, {
-      type: "DELETE",
-    });
+    return this.destroy();
   }
 
-  favorite() {
-    this.toggleProperty("is_favorite");
-    return ajax(`/user_badges/${this.id}/toggle_favorite`, {
-      type: "PUT",
-    }).catch((e) => {
-      // something went wrong, switch the UI back:
-      this.toggleProperty("is_favorite");
-      popupAjaxError(e);
+  async favorite() {
+    const store = warpStoreFor(UserBadge);
+    const previous = this.is_favorite;
+    const partial = (value) => ({
+      data: {
+        type: "user-badge",
+        id: this.id,
+        attributes: { is_favorite: value },
+      },
     });
+
+    // Optimistic flip — `store.push` of a partial resource merges attributes
+    // onto the existing cache entry, leaving relationships and other fields
+    // intact.
+    store.push(partial(!previous));
+
+    try {
+      await store.request(toggleFavoriteUserBadge(this.id));
+    } catch (e) {
+      store.push(partial(previous));
+      popupAjaxError(e);
+    }
   }
 }
+
+defineFieldForwarders(UserBadge, UserBadgeSchema);
