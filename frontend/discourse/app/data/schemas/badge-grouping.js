@@ -1,6 +1,6 @@
-import { withDefaults } from "@warp-drive/legacy/model/migration-support";
-import { attrs } from "./helpers";
+import { attrs, withDefaults } from "./helpers";
 
+/** @type {import("@warp-drive/core/types/schema/fields").LegacyResourceSchema} */
 export const BadgeGroupingSchema = withDefaults({
   type: "badge-grouping",
   fields: [

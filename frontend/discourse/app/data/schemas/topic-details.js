@@ -1,5 +1,4 @@
-import { withDefaults } from "@warp-drive/legacy/model/migration-support";
-import { attrs } from "./helpers";
+import { attrs, withDefaults } from "./helpers";
 
 // TopicDetails is a sub-resource owned by a Topic. Its identity is the
 // parent topic's id (one details per topic), and it ships embedded in the
@@ -11,6 +10,7 @@ import { attrs } from "./helpers";
 // LegacyMode would throw on unknown fields read from cached records.
 // Templates iterating these expect plain objects with `username` / `name`,
 // which the raw sideload payload already provides.
+/** @type {import("@warp-drive/core/types/schema/fields").LegacyResourceSchema} */
 export const TopicDetailsSchema = withDefaults({
   type: "topic-details",
   fields: [
