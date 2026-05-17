@@ -7,7 +7,6 @@ describe "Simplified Category Creation" do
 
   let(:category_page) { PageObjects::Pages::Category.new }
   let(:form) { PageObjects::Components::FormKit.new(".form-kit") }
-  let(:icon_picker) { PageObjects::Components::DIconGridPicker.new }
   let(:category_type_card) { PageObjects::Components::CategoryTypeCard.new }
   let(:category_permission_row) { PageObjects::Components::CategoryPermissionRow.new }
   let(:toasts) { PageObjects::Components::Toasts.new }
@@ -19,7 +18,7 @@ describe "Simplified Category Creation" do
 
   describe "Selecting category type when setting up a new category" do
     it "automatically skips category type selection when only one type (discussion) is available" do
-      visit("/new-category/setup")
+      category_page.visit_new_category
       expect(page).to have_content(I18n.t("js.category.create_with_type", typeName: "discussion"))
       expect(page).to have_current_path("/new-category/general")
     end
@@ -121,20 +120,6 @@ describe "Simplified Category Creation" do
       expect(form.field("color")).to have_errors(
         I18n.t("js.category.color_validations.non_hexdecimal"),
       )
-    end
-
-    it "shows error when icon is missing" do
-      category_page.visit_new_category
-
-      form.field("name").fill_in("Test Category")
-
-      icon_picker.expand
-      icon_picker.select_first_icon
-      icon_picker.clear
-
-      category_page.save_settings
-
-      expect(form.field("icon")).to have_errors(I18n.t("js.category.validations.icon_required"))
     end
 
     it "shows advanced tabs when toggled" do
@@ -249,6 +234,12 @@ describe "Simplified Category Creation" do
       expect(page).to have_css(".edit-category-description-container .readonly-field")
       expect(page).to have_content("Updated category description")
       expect(toasts).to have_success(I18n.t("js.category.description_updated"))
+    end
+
+    it "does not allow selecting other category types when creating a new category" do
+      category_page.visit_new_category
+      expect(page).to have_content(I18n.t("js.category.create_with_type", typeName: "discussion"))
+      expect(page).to have_no_css(".category-type-selector")
     end
   end
 

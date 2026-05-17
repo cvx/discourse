@@ -184,6 +184,7 @@ module.exports = function (defaults) {
         entry: {
           "assets/media-optimization-bundle.js": {
             import: "./static/media-optimization-bundle",
+            chunkLoading: "import-scripts",
             runtime: false,
           },
         },

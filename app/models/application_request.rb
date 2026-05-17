@@ -23,6 +23,7 @@ class ApplicationRequest < ActiveRecord::Base
          page_view_anon_browser_mobile_beacon: 18,
          page_view_logged_in_browser_beacon: 19,
          page_view_logged_in_browser_mobile_beacon: 20,
+         page_view_embed: 21,
        }
 
   include CachedCounting
@@ -82,9 +83,9 @@ end
 # Table name: application_requests
 #
 #  id       :integer          not null, primary key
+#  count    :integer          default(0), not null
 #  date     :date             not null
 #  req_type :integer          not null
-#  count    :integer          default(0), not null
 #
 # Indexes
 #
