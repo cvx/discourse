@@ -1,28 +1,21 @@
+import {
+  buildQuery,
+  createOne,
+  deleteOne,
+  readMany,
+} from "discourse/data/builders/helpers";
 import { normalizeUserBadgesPayload } from "discourse/data/normalize";
 
-function buildQuery(params) {
-  const entries = Object.entries(params).filter(
-    ([, v]) => v != null && v !== ""
-  );
-  if (entries.length === 0) {
-    return "";
-  }
-  return (
-    "?" +
-    entries
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join("&")
-  );
-}
+// Note: `/user-badges/:username` (dashed) is a distinct Rails route from
+// `/user_badges` (underscored) — not a typo. The dashed endpoint lists a
+// user's badges by username; the underscored endpoints are the CRUD ones.
 
 export function findUserBadgesByUsername(username, opts = {}) {
   const query = buildQuery({ grouped: opts.grouped ? "true" : null });
-  return {
-    url: `/user-badges/${encodeURIComponent(username)}.json${query}`,
-    method: "GET",
-    op: "query",
-    options: { normalize: normalizeUserBadgesPayload },
-  };
+  return readMany(
+    `/user-badges/${encodeURIComponent(username)}.json${query}`,
+    normalizeUserBadgesPayload
+  );
 }
 
 export function findUserBadgesByBadgeId(badgeId, opts = {}) {
@@ -31,35 +24,23 @@ export function findUserBadgesByBadgeId(badgeId, opts = {}) {
     offset: opts.offset,
     username: opts.username,
   });
-  return {
-    url: `/user_badges.json${query}`,
-    method: "GET",
-    op: "query",
-    options: { normalize: normalizeUserBadgesPayload },
-  };
+  return readMany(`/user_badges.json${query}`, normalizeUserBadgesPayload);
 }
 
 export function grantUserBadge(badgeId, username, reason) {
-  return {
-    url: `/user_badges`,
-    method: "POST",
-    op: "createRecord",
-    options: {
-      body: { username, badge_id: badgeId, reason },
-      normalize: normalizeUserBadgesPayload,
-    },
-  };
+  return createOne(
+    `/user_badges`,
+    { username, badge_id: badgeId, reason },
+    normalizeUserBadgesPayload
+  );
 }
 
 export function deleteUserBadge(id) {
-  return {
-    url: `/user_badges/${encodeURIComponent(id)}`,
-    method: "DELETE",
-    op: "deleteRecord",
-    data: { type: "user-badge", id: String(id) },
-  };
+  return deleteOne("user-badge", id, `/user_badges/${encodeURIComponent(id)}`);
 }
 
+// RPC-style: no `op` / `data` — this isn't a CRUD operation, and there's no
+// response body that should pass through normalization.
 export function toggleFavoriteUserBadge(id) {
   return {
     url: `/user_badges/${encodeURIComponent(id)}/toggle_favorite`,

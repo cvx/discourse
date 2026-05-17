@@ -1,47 +1,38 @@
+import {
+  buildQuery,
+  createOne,
+  deleteOne,
+  readMany,
+  readOne,
+  updateOne,
+} from "discourse/data/builders/helpers";
 import { normalizeBadgesPayload } from "discourse/data/normalize";
 
 export function findBadges(opts = {}) {
-  const params = opts.onlyListable ? "?only_listable=true" : "";
-  return {
-    url: `/badges.json${params}`,
-    method: "GET",
-    op: "query",
-    options: { normalize: normalizeBadgesPayload },
-  };
+  const query = buildQuery({ only_listable: opts.onlyListable ? "true" : null });
+  return readMany(`/badges.json${query}`, normalizeBadgesPayload);
 }
 
 export function findBadge(id) {
-  return {
-    url: `/badges/${encodeURIComponent(id)}`,
-    method: "GET",
-    op: "findRecord",
-    options: { normalize: normalizeBadgesPayload },
-  };
+  return readOne(
+    `/badges/${encodeURIComponent(id)}`,
+    normalizeBadgesPayload
+  );
 }
 
 export function saveBadge(badge, data) {
   if (badge.id != null) {
-    return {
-      url: `/admin/badges/${badge.id}`,
-      method: "PUT",
-      op: "updateRecord",
-      data: { type: "badge", id: String(badge.id) },
-      options: { body: data, normalize: normalizeBadgesPayload },
-    };
+    return updateOne(
+      "badge",
+      badge.id,
+      `/admin/badges/${encodeURIComponent(badge.id)}`,
+      data,
+      normalizeBadgesPayload
+    );
   }
-  return {
-    url: `/admin/badges`,
-    method: "POST",
-    op: "createRecord",
-    options: { body: data, normalize: normalizeBadgesPayload },
-  };
+  return createOne(`/admin/badges`, data, normalizeBadgesPayload);
 }
 
 export function deleteBadge(id) {
-  return {
-    url: `/admin/badges/${id}`,
-    method: "DELETE",
-    op: "deleteRecord",
-    data: { type: "badge", id: String(id) },
-  };
+  return deleteOne("badge", id, `/admin/badges/${encodeURIComponent(id)}`);
 }
