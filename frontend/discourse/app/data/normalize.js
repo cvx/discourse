@@ -21,17 +21,36 @@ function pickSchemaAttributes(raw, schema) {
   return out;
 }
 
-function badgeResource(raw) {
-  const relationships = {};
-  if (raw.badge_type_id != null) {
-    relationships.badge_type = {
-      data: { type: "badge-type", id: String(raw.badge_type_id) },
-    };
+// Emit a JSON:API relationship pointer only when the related resource is
+// present in `included` for this payload. Referencing a missing identity
+// would log a "No ResourceObject matching..." warning from the cache
+// validator, and the pointer would dangle on cold loads. Omitting it lets
+// the cache fall back to any existing entry for that identity (e.g. when
+// the index endpoint loaded the badge-grouping earlier).
+function relationshipIfIncluded(includedIds, type, id) {
+  if (id == null || !includedIds.has(`${type}:${id}`)) {
+    return undefined;
   }
-  if (raw.badge_grouping_id != null) {
-    relationships.badge_grouping = {
-      data: { type: "badge-grouping", id: String(raw.badge_grouping_id) },
-    };
+  return { data: { type, id: String(id) } };
+}
+
+function badgeResource(raw, includedIds) {
+  const relationships = {};
+  const badgeType = relationshipIfIncluded(
+    includedIds,
+    "badge-type",
+    raw.badge_type_id
+  );
+  if (badgeType) {
+    relationships.badge_type = badgeType;
+  }
+  const badgeGrouping = relationshipIfIncluded(
+    includedIds,
+    "badge-grouping",
+    raw.badge_grouping_id
+  );
+  if (badgeGrouping) {
+    relationships.badge_grouping = badgeGrouping;
   }
   return {
     type: "badge",
@@ -64,7 +83,7 @@ function badgeGroupingResource(raw) {
   };
 }
 
-function userBadgeResource(raw, lookup) {
+function userBadgeResource(raw, lookup, includedIds) {
   const attributes = pickSchemaAttributes(raw, UserBadgeSchema);
   // Inline the user/topic sideloads as plain attribute values so consumers
   // get plain JS objects (with arbitrary fields) rather than cached records.
@@ -79,10 +98,9 @@ function userBadgeResource(raw, lookup) {
   }
 
   const relationships = {};
-  if (raw.badge_id != null) {
-    relationships.badge = {
-      data: { type: "badge", id: String(raw.badge_id) },
-    };
+  const badge = relationshipIfIncluded(includedIds, "badge", raw.badge_id);
+  if (badge) {
+    relationships.badge = badge;
   }
   return {
     type: "user-badge",
@@ -105,6 +123,10 @@ function collectBadgeMetaIncluded(payload, included) {
   }
 }
 
+function indexIncluded(included) {
+  return new Set(included.map((r) => `${r.type}:${r.id}`));
+}
+
 // Accepts either:
 //   { badge: {...},  badge_types: [...], badge_groupings?: [...] }   (show)
 //   { badges: [...], badge_types: [...], badge_groupings: [...] }    (index)
@@ -117,12 +139,16 @@ export function normalizeBadgesPayload(payload) {
   }
   const included = [];
   collectBadgeMetaIncluded(payload, included);
+  const includedIds = indexIncluded(included);
 
   if (payload.badge) {
-    return { data: badgeResource(payload.badge), included };
+    return { data: badgeResource(payload.badge, includedIds), included };
   }
   if (payload.badges) {
-    return { data: payload.badges.map(badgeResource), included };
+    return {
+      data: payload.badges.map((raw) => badgeResource(raw, includedIds)),
+      included,
+    };
   }
   return { data: null, included };
 }
@@ -138,9 +164,14 @@ export function normalizeUserBadgesPayload(payload) {
   }
   const included = [];
   collectBadgeMetaIncluded(payload, included);
+  // Compute the type/id set BEFORE pushing sideloaded badges so each badge's
+  // relationships only reference badge-type / badge-grouping resources we
+  // actually included.
+  const badgeRelIds = indexIncluded(included);
   for (const raw of payload.badges ?? []) {
-    included.push(badgeResource(raw));
+    included.push(badgeResource(raw, badgeRelIds));
   }
+  const includedIds = indexIncluded(included);
 
   // Index sideloaded users / topics by id so the user-badge resource can
   // inline them as plain attribute values (see `userBadgeResource`).
@@ -163,13 +194,16 @@ export function normalizeUserBadgesPayload(payload) {
   };
 
   if (payload.user_badge) {
-    return { data: userBadgeResource(payload.user_badge, lookup), included };
+    return {
+      data: userBadgeResource(payload.user_badge, lookup, includedIds),
+      included,
+    };
   }
 
   const wrapper = payload.user_badge_info;
   const rawUserBadges = wrapper?.user_badges ?? payload.user_badges ?? [];
   const doc = {
-    data: rawUserBadges.map((ub) => userBadgeResource(ub, lookup)),
+    data: rawUserBadges.map((ub) => userBadgeResource(ub, lookup, includedIds)),
     included,
   };
   if (wrapper) {
