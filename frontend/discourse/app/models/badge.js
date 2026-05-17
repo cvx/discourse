@@ -5,13 +5,12 @@ import {
   saveBadge,
 } from "discourse/data/builders/badges";
 import { normalizeBadgesPayload } from "discourse/data/normalize";
-import WarpRestModel, {
-  defineFieldForwarders,
-} from "discourse/data/reactive-base";
+import RestCompatModel from "discourse/data/rest-compat";
 import { BadgeSchema } from "discourse/data/schemas/badge";
+import { defineFieldForwarders } from "discourse/data/warp-rest-model";
 import getURL from "discourse/lib/get-url";
 
-export default class Badge extends WarpRestModel {
+export default class Badge extends RestCompatModel {
   static type = "badge";
   static normalize = normalizeBadgesPayload;
   static builders = {

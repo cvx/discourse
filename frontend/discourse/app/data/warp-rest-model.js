@@ -5,16 +5,20 @@ export function warpStoreFor(klass) {
   return owner.lookup("service:warp-store");
 }
 
+// Pure WarpDrive integration base. Knows about schemas, the WarpDrive
+// request/cache pipeline, and the lifecycle of a single wrapped resource.
+// Does NOT know about Ember's EmberObject API (`get`/`set`/`setProperties`)
+// or the legacy `Klass.create(attrs)`-returns-draft contract — those live in
+// `rest-compat.js` for callers that still need them.
+//
+// Subclass contract:
+//   static type             — schema type, e.g. "badge"
+//   static normalize        — function: rooted JSON → JSON:API document
+//   static builders         — { list(opts), one(id), save(record, data), delete(id) }
 export default class WarpRestModel {
-  // Subclass must set:
-  //   static type             — schema type, e.g. "badge"
-  //   static normalize        — function: rooted JSON → JSON:API document
-  //   static builders         — { list(opts), one(id), save(badge, data), delete(id) }
   static type = null;
   static normalize = null;
   static builders = null;
-
-  // ---- Static shims (preserve `Klass.findAll` / `findById` / `createFromJson` / `create` API)
 
   static async findAll(opts) {
     const store = warpStoreFor(this);
@@ -31,7 +35,9 @@ export default class WarpRestModel {
     return new this(content?.data);
   }
 
-  // Used by callers like User.create / Post#badgesGranted / preloaded route models.
+  // Synchronously ingest already-loaded JSON into the cache. Used by callers
+  // that have a preloaded payload (PreloadStore, embedded sub-payloads) and
+  // want wrappers around the resulting cache records.
   static createFromJson(json) {
     const store = warpStoreFor(this);
     const document = this.normalize(json);
@@ -46,23 +52,7 @@ export default class WarpRestModel {
     return new this(store.push(document));
   }
 
-  // Used by the old store's `createRecord("badge", { ... })` factory path —
-  // returns a draft wrapper whose `__resource` is a plain attrs bag (not a
-  // cached LegacyMode record). `save()` swaps in the cached record after the
-  // server response arrives.
-  static create(attrs = {}) {
-    const wrapper = new this({ ...attrs });
-    wrapper.__isLocalDraft = true;
-    return wrapper;
-  }
-
   #resource;
-
-  // Drafts (returned from `Klass.create(attrs)`) hold a plain attrs bag as
-  // `__resource` until `save()` swaps in the cached LegacyMode record. The
-  // marker lives on the wrapper rather than on `__resource` because cached
-  // records reject any field not declared in their schema.
-  __isLocalDraft = false;
 
   constructor(resource) {
     this.#resource = resource;
@@ -72,76 +62,38 @@ export default class WarpRestModel {
     return this.#resource;
   }
 
-  // ---- Ember-style legacy accessors
-
-  get(path) {
-    if (typeof path !== "string") {
-      return undefined;
+  // Internal: try to swap `__resource` to the cached record for `id`. Called
+  // after `save` / `updateFromJson` / `_adoptCacheRecord`. Subclasses can
+  // override `_didReplaceResource` to react to the swap (e.g. clear draft
+  // state in the compat layer).
+  _adoptResource(id) {
+    if (id == null) {
+      return;
     }
-    let value = this;
-    for (const key of path.split(".")) {
-      if (value == null) {
-        return undefined;
-      }
-      value = value[key];
+    const Klass = this.constructor;
+    const cached = warpStoreFor(Klass).peekRecord({
+      type: Klass.type,
+      id: String(id),
+    });
+    if (cached && cached !== this.#resource) {
+      this.#resource = cached;
+      this._didReplaceResource();
     }
-    return value;
   }
 
-  set(key, value) {
-    // For drafts, mutate the attrs bag directly so subsequent reads see the
-    // new value. For LegacyMode cache records, write through the prototype
-    // setter (which delegates to the record's own field).
-    if (this.__isLocalDraft) {
-      this.__resource[key] = value;
-      return value;
-    }
-    this[key] = value;
-    return value;
-  }
-
-  getProperties(...keys) {
-    if (keys.length === 1 && Array.isArray(keys[0])) {
-      keys = keys[0];
-    }
-    const out = {};
-    for (const key of keys) {
-      out[key] = this.get(key);
-    }
-    return out;
-  }
-
-  setProperties(hash) {
-    if (!hash) {
-      return hash;
-    }
-    for (const key of Object.keys(hash)) {
-      this.set(key, hash[key]);
-    }
-    return hash;
-  }
-
-  // ---- Lifecycle
+  _didReplaceResource() {}
 
   updateFromJson(json) {
     if (json == null) {
       return this;
     }
     const Klass = this.constructor;
-    const store = warpStoreFor(Klass);
     const document = Klass.normalize(json);
     if (!document || Array.isArray(document.data)) {
       return this;
     }
-    store.push(document);
-    const id = document.data?.id;
-    if (id != null) {
-      const cached = store.peekRecord({ type: Klass.type, id });
-      if (cached && cached !== this.#resource) {
-        this.#resource = cached;
-        this.__isLocalDraft = false;
-      }
-    }
+    warpStoreFor(Klass).push(document);
+    this._adoptResource(document.data?.id);
     return this;
   }
 
@@ -149,16 +101,7 @@ export default class WarpRestModel {
     const Klass = this.constructor;
     const store = warpStoreFor(Klass);
     const result = await store.request(Klass.builders.save(this, data));
-
-    const doc = result.content;
-    const id = doc?.data?.id;
-    if (id != null) {
-      const cached = store.peekRecord({ type: Klass.type, id });
-      if (cached && cached !== this.#resource) {
-        this.#resource = cached;
-        this.__isLocalDraft = false;
-      }
-    }
+    this._adoptResource(result.content?.data?.id);
     return this;
   }
 
@@ -168,27 +111,13 @@ export default class WarpRestModel {
     if (id == null) {
       return;
     }
-    const store = warpStoreFor(Klass);
-    await store.request(Klass.builders.delete(id));
+    await warpStoreFor(Klass).request(Klass.builders.delete(id));
   }
 
-  // If a cache record now exists for this wrapper's id, swap `__resource` to
-  // it. Used after `store.push` for an optimistic update on a draft so that
-  // subsequent reads from the wrapper reflect the pushed attributes.
+  // Used after `store.push` for an optimistic update so the wrapper reflects
+  // the pushed attributes (matters when the wrapper started as a draft).
   _adoptCacheRecord() {
-    const Klass = this.constructor;
-    const id = this.id;
-    if (id == null) {
-      return;
-    }
-    const cached = warpStoreFor(Klass).peekRecord({
-      type: Klass.type,
-      id: String(id),
-    });
-    if (cached && cached !== this.#resource) {
-      this.#resource = cached;
-      this.__isLocalDraft = false;
-    }
+    this._adoptResource(this.id);
   }
 }
 
@@ -205,8 +134,8 @@ export function attachMeta(records, meta) {
 // key). Each reads/writes through `this.__resource`:
 //   - For LegacyMode cache records the underlying field is mutable, so a
 //     write lands as a normal property assignment.
-//   - For drafts the attrs bag is a plain object — same property assignment
-//     works.
+//   - For drafts (rest-compat) the attrs bag is a plain object — same
+//     property assignment works.
 // Explicit getters declared in the subclass body are preserved (they show up
 // as own props on the prototype before this runs).
 export function defineFieldForwarders(Klass, schema) {

@@ -5,18 +5,19 @@ import {
   updateTopicNotificationLevel,
 } from "discourse/data/builders/topic-details";
 import { normalizeTopicDetailsPayload } from "discourse/data/normalize";
-import WarpRestModel, {
+import RestCompatModel from "discourse/data/rest-compat";
+import { TopicDetailsSchema } from "discourse/data/schemas/topic-details";
+import {
   defineFieldForwarders,
   warpStoreFor,
-} from "discourse/data/reactive-base";
-import { TopicDetailsSchema } from "discourse/data/schemas/topic-details";
+} from "discourse/data/warp-rest-model";
 
 /**
  * A topic's details (allowed users/groups, can_* permissions, notification
  * level, etc.). Loaded as part of the topic-view payload rather than from a
  * dedicated endpoint — its identity is the parent topic's id.
  */
-export default class TopicDetails extends WarpRestModel {
+export default class TopicDetails extends RestCompatModel {
   static type = "topic-details";
 
   // Old-store entry point: `store.createRecord("topicDetails", { id, topic, ...attrs })`.

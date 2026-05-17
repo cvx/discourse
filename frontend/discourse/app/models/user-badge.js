@@ -5,17 +5,18 @@ import {
   toggleFavoriteUserBadge,
 } from "discourse/data/builders/user-badges";
 import { normalizeUserBadgesPayload } from "discourse/data/normalize";
-import WarpRestModel, {
+import RestCompatModel from "discourse/data/rest-compat";
+import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
+import {
   attachMeta,
   defineFieldForwarders,
   warpStoreFor,
-} from "discourse/data/reactive-base";
-import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
+} from "discourse/data/warp-rest-model";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import Badge from "discourse/models/badge";
 
-export default class UserBadge extends WarpRestModel {
+export default class UserBadge extends RestCompatModel {
   static type = "user-badge";
   static normalize = normalizeUserBadgesPayload;
 
