@@ -57,7 +57,7 @@ export default class WarpRestModel {
 
   // Internal: try to swap `__resource` to the cached record for `id`. Called
   // after `save` / `updateFromJson` / `_adoptCacheRecord`. Subclasses can
-  // override `_didReplaceResource` to react to the swap (e.g. clear draft
+  // define `_didReplaceResource` to react to the swap (e.g. clear draft
   // state in the compat layer).
   _adoptResource(id) {
     if (id == null) {
@@ -70,11 +70,9 @@ export default class WarpRestModel {
     });
     if (cached && cached !== this.#resource) {
       this.#resource = cached;
-      this._didReplaceResource();
+      this._didReplaceResource?.();
     }
   }
-
-  _didReplaceResource() {}
 
   updateFromJson(json) {
     if (json == null) {
