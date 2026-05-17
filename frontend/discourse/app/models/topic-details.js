@@ -1,90 +1,126 @@
 import { tracked } from "@glimmer/tracking";
-import EmberObject from "@ember/object";
-import { service } from "@ember/service";
-import { ajax } from "discourse/lib/ajax";
-import { removeValueFromArray } from "discourse/lib/array-tools";
-import { autoTrackedArray } from "discourse/lib/tracked-tools";
-import RestModel from "discourse/models/rest";
+import {
+  removeAllowedTopicGroup,
+  removeAllowedTopicUser,
+  updateTopicNotificationLevel,
+} from "discourse/data/builders/topic-details";
+import { normalizeTopicDetailsPayload } from "discourse/data/normalize";
+import WarpRestModel, {
+  defineFieldForwarders,
+  warpStoreFor,
+} from "discourse/data/reactive-base";
+import { TopicDetailsSchema } from "discourse/data/schemas/topic-details";
+
+// Builds a partial relationship-update push for a hasMany on the
+// topic-details cache record. Used after a remove-allowed-X call returns to
+// reflect the removal locally.
+function pushRelationship(td, relationshipName, remainingRecords, relatedType) {
+  const store = warpStoreFor(td.constructor);
+  store.push({
+    data: {
+      type: "topic-details",
+      id: td.id,
+      relationships: {
+        [relationshipName]: {
+          data: remainingRecords.map((r) => ({
+            type: relatedType,
+            id: String(r.id),
+          })),
+        },
+      },
+    },
+  });
+}
 
 /**
-  A model representing a Topic's details that aren't always present, such as a list of participants.
-  When showing topics in lists and such this information should not be required.
-**/
+ * A topic's details (allowed users/groups, can_* permissions, notification
+ * level, etc.). Loaded as part of the topic-view payload rather than from a
+ * dedicated endpoint — its identity is the parent topic's id.
+ */
+export default class TopicDetails extends WarpRestModel {
+  static type = "topic-details";
 
-export default class TopicDetails extends RestModel {
-  @service store;
+  // Old-store entry point: `store.createRecord("topicDetails", { id, topic })`.
+  // Returns a wrapper bound to the topic id; the cache stays empty until
+  // `updateFromJson` is called with actual data.
+  static create(attrs = {}) {
+    const td = new this(attrs.id);
+    if (attrs.topic !== undefined) {
+      td.topic = attrs.topic;
+    }
+    return td;
+  }
 
-  @tracked can_delete;
-  @tracked can_edit_staff_notes;
-  @tracked can_permanently_delete;
-  @tracked can_publish_page;
-  @tracked can_split_merge_topic;
-  @tracked created_by;
-  @tracked notification_level;
-  @autoTrackedArray allowed_groups;
-  @autoTrackedArray allowed_users;
+  @tracked loaded = false;
+  topic = null;
 
-  loaded = false;
+  #topicId;
 
+  constructor(topicId) {
+    super();
+    this.#topicId = topicId == null ? null : String(topicId);
+  }
+
+  get id() {
+    return this.#topicId;
+  }
+
+  // The cache resource is materialized lazily — at construction time the
+  // details haven't loaded yet. Re-reading each access keeps the wrapper in
+  // sync with the cache when `updateFromJson` (or any partial push) lands.
+  get __resource() {
+    if (this.#topicId == null) {
+      return null;
+    }
+    return (
+      warpStoreFor(this.constructor).peekRecord({
+        type: "topic-details",
+        id: this.#topicId,
+      }) ?? null
+    );
+  }
+
+  // Topic invokes this when the topic-view JSON arrives (and on subsequent
+  // refreshes). Pushes a full normalized doc; subsequent calls merge.
   updateFromJson(details) {
-    const topic = this.topic;
-
-    if (details.allowed_users) {
-      details.allowed_users = details.allowed_users.map((u) =>
-        this.store.createRecord("user", u)
-      );
+    if (this.#topicId == null || !details) {
+      return;
     }
-
-    if (details.participants) {
-      details.participants = details.participants.map((p) => {
-        p.topic = topic;
-        return EmberObject.create(p);
-      });
-    }
-
-    this.setProperties(details);
-    this.set("loaded", true);
+    const store = warpStoreFor(this.constructor);
+    store.push(
+      normalizeTopicDetailsPayload({ topicId: this.#topicId, details })
+    );
+    this.loaded = true;
   }
 
   updateNotifications(level) {
-    return ajax(`/t/${this.get("topic.id")}/notifications`, {
-      type: "POST",
-      data: { notification_level: level },
-    }).then(() => {
-      this.setProperties({
-        notification_level: level,
-        notifications_reason_id: null,
+    const store = warpStoreFor(this.constructor);
+    return store
+      .request(updateTopicNotificationLevel(this.#topicId, level))
+      .then(() => {
+        this._pushAttributes({
+          notification_level: level,
+          notifications_reason_id: null,
+        });
       });
-    });
   }
 
   async removeAllowedGroup(group) {
-    const groups = this.allowed_groups;
-    const name = group.name;
+    const store = warpStoreFor(this.constructor);
+    await store.request(removeAllowedTopicGroup(this.#topicId, group.name));
 
-    await ajax(`/t/${this.get("topic.id")}/remove-allowed-group`, {
-      type: "PUT",
-      data: { name },
-    });
-
-    removeValueFromArray(
-      groups,
-      groups.find((item) => item.name === name)
-    );
+    const remaining = this.allowed_groups.filter((g) => g.name !== group.name);
+    pushRelationship(this, "allowed_groups", remaining, "group");
   }
 
   async removeAllowedUser(user) {
-    const users = this.allowed_users;
-    const username = user.get("username");
+    const username = user.username ?? user.get?.("username");
+    const store = warpStoreFor(this.constructor);
+    await store.request(removeAllowedTopicUser(this.#topicId, username));
 
-    await ajax(`/t/${this.get("topic.id")}/remove-allowed-user`, {
-      type: "PUT",
-      data: { username },
-    });
-
-    removeValueFromArray(
-      users,
-      users.find((item) => item.username === username)
-    );
+    const remaining = this.allowed_users.filter((u) => u.username !== username);
+    pushRelationship(this, "allowed_users", remaining, "user");
   }
 }
+
+defineFieldForwarders(TopicDetails, TopicDetailsSchema);

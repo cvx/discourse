@@ -1,60 +1,23 @@
-const BADGE_ATTRIBUTE_KEYS = [
-  "name",
-  "description",
-  "long_description",
-  "slug",
-  "icon",
-  "image_url",
-  "grant_count",
-  "enabled",
-  "listable",
-  "show_in_post_header",
-  "has_badge",
-  "allow_title",
-  "multiple_grant",
-  "manually_grantable",
-  "system",
-  // AdminBadgeSerializer attributes; absent from public responses, copied
-  // through when present.
-  "query",
-  "trigger",
-  "target_posts",
-  "auto_revoke",
-  "show_posts",
-  "i18n_name",
-  "image_upload_id",
-];
+import { BadgeSchema } from "discourse/data/schemas/badge";
+import { BadgeGroupingSchema } from "discourse/data/schemas/badge-grouping";
+import { BadgeTypeSchema } from "discourse/data/schemas/badge-type";
+import { GroupSchema } from "discourse/data/schemas/group";
+import { TopicSchema } from "discourse/data/schemas/topic";
+import { TopicDetailsSchema } from "discourse/data/schemas/topic-details";
+import { UserSchema } from "discourse/data/schemas/user";
+import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
 
-const USER_ATTRIBUTE_KEYS = [
-  "username",
-  "name",
-  "avatar_template",
-  "moderator",
-  "admin",
-  "primary_group_name",
-  "title",
-];
-
-const TOPIC_ATTRIBUTE_KEYS = ["title", "fancy_title", "slug", "posts_count"];
-
-const USER_BADGE_ATTRIBUTE_KEYS = [
-  "granted_at",
-  "created_at",
-  "count",
-  "post_id",
-  "post_number",
-  "grouping_position",
-  "topic_id",
-  "topic_title",
-  "is_favorite",
-  "can_favorite",
-];
-
-function pickAttributes(raw, keys) {
+// Pull every `kind: "field"` (scalar) name out of the raw payload into a
+// JSON:API `attributes` object. Relationship fields are handled separately
+// by each per-resource builder.
+function pickSchemaAttributes(raw, schema) {
   const out = {};
-  for (const key of keys) {
-    if (key in raw) {
-      out[key] = raw[key];
+  for (const field of schema.fields ?? []) {
+    if (field.kind !== "field") {
+      continue;
+    }
+    if (field.name in raw) {
+      out[field.name] = raw[field.name];
     }
   }
   return out;
@@ -75,7 +38,7 @@ function badgeResource(raw) {
   return {
     type: "badge",
     id: String(raw.id),
-    attributes: pickAttributes(raw, BADGE_ATTRIBUTE_KEYS),
+    attributes: pickSchemaAttributes(raw, BadgeSchema),
     relationships,
   };
 }
@@ -84,7 +47,7 @@ function badgeTypeResource(raw) {
   return {
     type: "badge-type",
     id: String(raw.id),
-    attributes: pickAttributes(raw, ["name", "sort_order"]),
+    attributes: pickSchemaAttributes(raw, BadgeTypeSchema),
   };
 }
 
@@ -92,12 +55,7 @@ function badgeGroupingResource(raw) {
   return {
     type: "badge-grouping",
     id: String(raw.id),
-    attributes: pickAttributes(raw, [
-      "name",
-      "description",
-      "position",
-      "system",
-    ]),
+    attributes: pickSchemaAttributes(raw, BadgeGroupingSchema),
   };
 }
 
@@ -105,7 +63,7 @@ function userResource(raw) {
   return {
     type: "user",
     id: String(raw.id),
-    attributes: pickAttributes(raw, USER_ATTRIBUTE_KEYS),
+    attributes: pickSchemaAttributes(raw, UserSchema),
   };
 }
 
@@ -113,7 +71,15 @@ function topicResource(raw) {
   return {
     type: "topic",
     id: String(raw.id),
-    attributes: pickAttributes(raw, TOPIC_ATTRIBUTE_KEYS),
+    attributes: pickSchemaAttributes(raw, TopicSchema),
+  };
+}
+
+function groupResource(raw) {
+  return {
+    type: "group",
+    id: String(raw.id),
+    attributes: pickSchemaAttributes(raw, GroupSchema),
   };
 }
 
@@ -142,7 +108,7 @@ function userBadgeResource(raw) {
   return {
     type: "user-badge",
     id: String(raw.id),
-    attributes: pickAttributes(raw, USER_BADGE_ATTRIBUTE_KEYS),
+    attributes: pickSchemaAttributes(raw, UserBadgeSchema),
     relationships,
   };
 }
@@ -225,4 +191,45 @@ export function normalizeUserBadgesPayload(payload) {
     };
   }
   return doc;
+}
+
+// Builds a JSON:API document for a single TopicDetails record from the
+// embedded `details` object of a topic-view payload. The parent topic's id
+// becomes the topic-details identity (one details per topic).
+export function normalizeTopicDetailsPayload({ topicId, details }) {
+  const included = [];
+  const relationships = {};
+
+  if (details.allowed_users) {
+    relationships.allowed_users = {
+      data: details.allowed_users.map((u) => ({
+        type: "user",
+        id: String(u.id),
+      })),
+    };
+    for (const raw of details.allowed_users) {
+      included.push(userResource(raw));
+    }
+  }
+  if (details.allowed_groups) {
+    relationships.allowed_groups = {
+      data: details.allowed_groups.map((g) => ({
+        type: "group",
+        id: String(g.id),
+      })),
+    };
+    for (const raw of details.allowed_groups) {
+      included.push(groupResource(raw));
+    }
+  }
+
+  return {
+    data: {
+      type: "topic-details",
+      id: String(topicId),
+      attributes: pickSchemaAttributes(details, TopicDetailsSchema),
+      relationships,
+    },
+    included,
+  };
 }

@@ -117,31 +117,57 @@ export default class WarpRestModel {
     const store = warpStoreFor(Klass);
     await store.request(Klass.builders.delete(id));
   }
+
+  // Pushes a partial attribute update into the cache for this record's
+  // identity. Used by field setters and by instance methods that want to
+  // reflect a server-confirmed change locally.
+  _pushAttributes(attributes) {
+    const Klass = this.constructor;
+    const id = this.id;
+    if (id == null) {
+      return;
+    }
+    const store = warpStoreFor(Klass);
+    store.push({
+      data: { type: Klass.type, id: String(id), attributes },
+    });
+  }
 }
 
-// Define getters on Klass.prototype for each schema field (and the identity key),
-// each delegating to `this.__resource[name]`. Explicit getters declared in the
-// subclass body are preserved (they show up as own props on the prototype).
+// Define accessors on Klass.prototype for each schema field (and the identity
+// key). Scalar `kind: "field"` fields get both a getter and a setter — the
+// setter pushes a partial attribute update so Ember-style
+// `setProperties({"foo.bar": value})` path-walking lands a write in the cache.
+// Relationship fields (belongsTo, hasMany) get a getter only; their cached
+// representation isn't reassignable through a simple value swap.
+// Explicit getters declared in the subclass body are preserved (they show up
+// as own props on the prototype before this runs).
 export function defineFieldForwarders(Klass, schema) {
   const proto = Klass.prototype;
-  const names = new Set();
+  const fieldKinds = new Map();
   if (schema.identity?.name) {
-    names.add(schema.identity.name);
+    fieldKinds.set(schema.identity.name, "@id");
   }
   for (const field of schema.fields ?? []) {
-    if (field.name) {
-      names.add(field.name);
+    if (field.name && !fieldKinds.has(field.name)) {
+      fieldKinds.set(field.name, field.kind);
     }
   }
-  for (const name of names) {
+  for (const [name, kind] of fieldKinds) {
     if (Object.prototype.hasOwnProperty.call(proto, name)) {
       continue;
     }
-    Object.defineProperty(proto, name, {
+    const descriptor = {
       configurable: true,
       get() {
-        return this.__resource[name];
+        return this.__resource?.[name];
       },
-    });
+    };
+    if (kind === "field") {
+      descriptor.set = function (value) {
+        this._pushAttributes({ [name]: value });
+      };
+    }
+    Object.defineProperty(proto, name, descriptor);
   }
 }
