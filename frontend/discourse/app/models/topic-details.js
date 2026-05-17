@@ -1,4 +1,5 @@
 import { tracked } from "@glimmer/tracking";
+import EmberObject from "@ember/object";
 import {
   removeAllowedTopicGroup,
   removeAllowedTopicUser,
@@ -11,6 +12,7 @@ import {
   defineFieldForwarders,
   warpStoreFor,
 } from "discourse/data/warp-rest-model";
+import User from "discourse/models/user";
 
 /**
  * A topic's details (allowed users/groups, can_* permissions, notification
@@ -83,13 +85,28 @@ export default class TopicDetails extends RestCompatModel {
 
   // Topic invokes this when the topic-view JSON arrives (and on subsequent
   // refreshes). Pushes a full normalized doc; subsequent calls merge.
+  //
+  // Wraps raw user/participant sideloads as `User` / `EmberObject` instances
+  // before pushing into the cache so callers can do `instanceof User` and
+  // access EmberObject methods like `get("username")`. Matches the legacy
+  // RestModel behavior (see git log @ 3a892292d51).
   updateFromJson(details) {
     const id = this.#effectiveTopicId();
     if (id == null || !details) {
       return;
     }
+    const wrapped = { ...details };
+    if (details.allowed_users) {
+      wrapped.allowed_users = details.allowed_users.map((u) => User.create(u));
+    }
+    if (details.participants) {
+      const topic = this.topic;
+      wrapped.participants = details.participants.map((p) =>
+        EmberObject.create({ ...p, topic })
+      );
+    }
     const store = warpStoreFor(this.constructor);
-    store.push(normalizeTopicDetailsPayload({ topicId: id, details }));
+    store.push(normalizeTopicDetailsPayload({ topicId: id, details: wrapped }));
     this.loaded = true;
   }
 

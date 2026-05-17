@@ -98,8 +98,9 @@ function collectBadgeMetaIncluded(payload, included) {
 //   { badge: {...},  badge_types: [...], badge_groupings?: [...] }   (show)
 //   { badges: [...], badge_types: [...], badge_groupings: [...] }    (index)
 // Returns a JSON:API document: { data, included }. Empty / unrecognized
-// payloads (e.g. an empty response body after a save) produce `{ data: null }`,
-// which the cache validator accepts as a no-op.
+// payloads (e.g. an empty response body after a save) produce `{ data: null }`
+// (without `included`, which JSON:API forbids when data is null), which the
+// cache validator accepts as a no-op.
 export function normalizeBadgesPayload(payload) {
   if (!payload) {
     return { data: null };
@@ -117,7 +118,7 @@ export function normalizeBadgesPayload(payload) {
       included,
     };
   }
-  return { data: null, included };
+  return { data: null };
 }
 
 // Accepts any of:
