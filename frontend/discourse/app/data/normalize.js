@@ -1,7 +1,7 @@
 import {
   indexIncluded,
+  maybeRelate,
   pickSchemaAttributes,
-  relationshipIfIncluded,
 } from "discourse/data/jsonapi-utils";
 import { BadgeSchema } from "discourse/data/schemas/badge";
 import { BadgeGroupingSchema } from "discourse/data/schemas/badge-grouping";
@@ -12,22 +12,20 @@ import { i18n } from "discourse-i18n";
 
 function badgeResource(raw, includedIds) {
   const relationships = {};
-  const badgeType = relationshipIfIncluded(
+  maybeRelate(
+    relationships,
+    "badge_type",
     includedIds,
     "badge-type",
     raw.badge_type_id
   );
-  if (badgeType) {
-    relationships.badge_type = badgeType;
-  }
-  const badgeGrouping = relationshipIfIncluded(
+  maybeRelate(
+    relationships,
+    "badge_grouping",
     includedIds,
     "badge-grouping",
     raw.badge_grouping_id
   );
-  if (badgeGrouping) {
-    relationships.badge_grouping = badgeGrouping;
-  }
   return {
     type: "badge",
     id: String(raw.id),
@@ -74,10 +72,7 @@ function userBadgeResource(raw, lookup, includedIds) {
   }
 
   const relationships = {};
-  const badge = relationshipIfIncluded(includedIds, "badge", raw.badge_id);
-  if (badge) {
-    relationships.badge = badge;
-  }
+  maybeRelate(relationships, "badge", includedIds, "badge", raw.badge_id);
   return {
     type: "user-badge",
     id: String(raw.id),

@@ -20,19 +20,12 @@ export default class WarpRestModel {
   static normalize = null;
   static builders = null;
 
-  static async findAll(opts) {
-    const store = warpStoreFor(this);
-    const { content } = await store.request(this.builders.list(opts));
-    return attachMeta(
-      (content?.data ?? []).map((resource) => new this(resource)),
-      content?.meta
-    );
+  static findAll(opts) {
+    return requestMany(this, this.builders.list(opts));
   }
 
-  static async findById(id) {
-    const store = warpStoreFor(this);
-    const { content } = await store.request(this.builders.one(id));
-    return new this(content?.data);
+  static findById(id) {
+    return requestOne(this, this.builders.one(id));
   }
 
   // Synchronously ingest already-loaded JSON into the cache. Used by callers
@@ -128,6 +121,24 @@ export function attachMeta(records, meta) {
     Object.assign(records, meta);
   }
   return records;
+}
+
+// Issue a request through the warp-store and wrap each resource in `content.data`
+// (assumed to be an array) with `new Klass(...)`. Surfaces `content.meta` keys on
+// the returned array so legacy callers can read them directly.
+export async function requestMany(Klass, request) {
+  const { content } = await warpStoreFor(Klass).request(request);
+  return attachMeta(
+    (content?.data ?? []).map((r) => new Klass(r)),
+    content?.meta
+  );
+}
+
+// Issue a request through the warp-store and wrap `content.data` (a single
+// resource) with `new Klass(...)`.
+export async function requestOne(Klass, request) {
+  const { content } = await warpStoreFor(Klass).request(request);
+  return new Klass(content?.data);
 }
 
 // Define accessors on Klass.prototype for each schema field (and the identity

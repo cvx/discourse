@@ -8,8 +8,9 @@ import { normalizeUserBadgesPayload } from "discourse/data/normalize";
 import RestCompatModel from "discourse/data/rest-compat";
 import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
 import {
-  attachMeta,
   defineFieldForwarders,
+  requestMany,
+  requestOne,
   warpStoreFor,
 } from "discourse/data/warp-rest-model";
 import { ajax } from "discourse/lib/ajax";
@@ -20,37 +21,19 @@ export default class UserBadge extends RestCompatModel {
   static type = "user-badge";
   static normalize = normalizeUserBadgesPayload;
 
-  static async findByUsername(username, options = {}) {
+  static findByUsername(username, options = {}) {
     if (!username) {
       return [];
     }
-    const store = warpStoreFor(this);
-    const { content } = await store.request(
-      findUserBadgesByUsername(username, options)
-    );
-    return attachMeta(
-      (content?.data ?? []).map((resource) => new this(resource)),
-      content?.meta
-    );
+    return requestMany(this, findUserBadgesByUsername(username, options));
   }
 
-  static async findByBadgeId(badgeId, options = {}) {
-    const store = warpStoreFor(this);
-    const { content } = await store.request(
-      findUserBadgesByBadgeId(badgeId, options)
-    );
-    return attachMeta(
-      (content?.data ?? []).map((resource) => new this(resource)),
-      content?.meta
-    );
+  static findByBadgeId(badgeId, options = {}) {
+    return requestMany(this, findUserBadgesByBadgeId(badgeId, options));
   }
 
-  static async grant(badgeId, username, reason) {
-    const store = warpStoreFor(this);
-    const { content } = await store.request(
-      grantUserBadge(badgeId, username, reason)
-    );
-    return new this(content?.data);
+  static grant(badgeId, username, reason) {
+    return requestOne(this, grantUserBadge(badgeId, username, reason));
   }
 
   // `badge` derived getters (url, badgeTypeClassName, image, newBadge) live
