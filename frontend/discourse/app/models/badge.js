@@ -21,17 +21,22 @@ export default class Badge extends WarpRestModel {
     delete: deleteBadge,
   };
 
-  // For cached records, the relation comes back through the belongsTo on the
-  // ReactiveResource (`badge_type.id`). For drafts created via `Badge.create`
-  // the attrs bag holds `badge_type_id` directly. Support both.
+  // For cached records, the relation comes back through the belongsTo
+  // (`badge_type.id`). For drafts created via `Badge.create` the wrapper's
+  // `__resource` is a plain attrs bag that holds `badge_type_id` directly —
+  // LegacyMode records would throw on a non-schema field, so we branch.
   get badge_type_id() {
-    return this.__resource.badge_type_id ?? this.__resource.badge_type?.id;
+    if (this.__isLocalDraft) {
+      return this.__resource.badge_type_id;
+    }
+    return this.__resource?.badge_type?.id;
   }
 
   get badge_grouping_id() {
-    return (
-      this.__resource.badge_grouping_id ?? this.__resource.badge_grouping?.id
-    );
+    if (this.__isLocalDraft) {
+      return this.__resource.badge_grouping_id;
+    }
+    return this.__resource?.badge_grouping?.id;
   }
 
   // The `icon-or-image` helper reads `badge.image` and prefers it over `icon`

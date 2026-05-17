@@ -1,19 +1,17 @@
 import { BadgeSchema } from "discourse/data/schemas/badge";
 import { BadgeGroupingSchema } from "discourse/data/schemas/badge-grouping";
 import { BadgeTypeSchema } from "discourse/data/schemas/badge-type";
-import { GroupSchema } from "discourse/data/schemas/group";
-import { TopicSchema } from "discourse/data/schemas/topic";
 import { TopicDetailsSchema } from "discourse/data/schemas/topic-details";
-import { UserSchema } from "discourse/data/schemas/user";
 import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
+import { i18n } from "discourse-i18n";
 
-// Pull every `kind: "field"` (scalar) name out of the raw payload into a
-// JSON:API `attributes` object. Relationship fields are handled separately
-// by each per-resource builder.
+// Pull every scalar field out of the raw payload into a JSON:API
+// `attributes` object. Relationship fields are handled separately by each
+// per-resource builder.
 function pickSchemaAttributes(raw, schema) {
   const out = {};
   for (const field of schema.fields ?? []) {
-    if (field.kind !== "field") {
+    if (field.kind !== "attribute") {
       continue;
     }
     if (field.name in raw) {
@@ -52,63 +50,44 @@ function badgeTypeResource(raw) {
 }
 
 function badgeGroupingResource(raw) {
+  const attributes = pickSchemaAttributes(raw, BadgeGroupingSchema);
+  if (raw.name) {
+    const i18nNameKey = raw.name.toLowerCase().replace(/\s/g, "_");
+    attributes.displayName = i18n(`badges.badge_grouping.${i18nNameKey}.name`, {
+      defaultValue: raw.name,
+    });
+  }
   return {
     type: "badge-grouping",
     id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, BadgeGroupingSchema),
+    attributes,
   };
 }
 
-function userResource(raw) {
-  return {
-    type: "user",
-    id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, UserSchema),
-  };
-}
+function userBadgeResource(raw, lookup) {
+  const attributes = pickSchemaAttributes(raw, UserBadgeSchema);
+  // Inline the user/topic sideloads as plain attribute values so consumers
+  // get plain JS objects (with arbitrary fields) rather than cached records.
+  if (raw.user_id != null) {
+    attributes.user = lookup.user(raw.user_id);
+  }
+  if (raw.granted_by_id != null) {
+    attributes.granted_by = lookup.user(raw.granted_by_id);
+  }
+  if (raw.topic_id != null) {
+    attributes.topic = lookup.topic(raw.topic_id);
+  }
 
-function topicResource(raw) {
-  return {
-    type: "topic",
-    id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, TopicSchema),
-  };
-}
-
-function groupResource(raw) {
-  return {
-    type: "group",
-    id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, GroupSchema),
-  };
-}
-
-function userBadgeResource(raw) {
   const relationships = {};
   if (raw.badge_id != null) {
     relationships.badge = {
       data: { type: "badge", id: String(raw.badge_id) },
     };
   }
-  if (raw.user_id != null) {
-    relationships.user = {
-      data: { type: "user", id: String(raw.user_id) },
-    };
-  }
-  if (raw.granted_by_id != null) {
-    relationships.granted_by = {
-      data: { type: "user", id: String(raw.granted_by_id) },
-    };
-  }
-  if (raw.topic_id != null) {
-    relationships.topic = {
-      data: { type: "topic", id: String(raw.topic_id) },
-    };
-  }
   return {
     type: "user-badge",
     id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, UserBadgeSchema),
+    attributes,
     relationships,
   };
 }
@@ -129,18 +108,23 @@ function collectBadgeMetaIncluded(payload, included) {
 // Accepts either:
 //   { badge: {...},  badge_types: [...], badge_groupings?: [...] }   (show)
 //   { badges: [...], badge_types: [...], badge_groupings: [...] }    (index)
-// Returns a JSON:API document: { data, included }.
+// Returns a JSON:API document: { data, included }. Empty / unrecognized
+// payloads (e.g. an empty response body after a save) produce `{ data: null }`,
+// which the cache validator accepts as a no-op.
 export function normalizeBadgesPayload(payload) {
+  if (!payload) {
+    return { data: null };
+  }
   const included = [];
   collectBadgeMetaIncluded(payload, included);
 
   if (payload.badge) {
     return { data: badgeResource(payload.badge), included };
   }
-  return {
-    data: (payload.badges ?? []).map(badgeResource),
-    included,
-  };
+  if (payload.badges) {
+    return { data: payload.badges.map(badgeResource), included };
+  }
+  return { data: null, included };
 }
 
 // Accepts any of:
@@ -149,39 +133,43 @@ export function normalizeBadgesPayload(payload) {
 //   { user_badge_info: { user_badges, grant_count, username }, badges, ... }     (findByBadgeId)
 // Returns { data, included, meta? }.
 export function normalizeUserBadgesPayload(payload) {
+  if (!payload) {
+    return { data: null };
+  }
   const included = [];
   collectBadgeMetaIncluded(payload, included);
   for (const raw of payload.badges ?? []) {
     included.push(badgeResource(raw));
   }
 
-  // Users may appear in either `users` (grantees) or `granted_bies` (granters);
-  // dedupe by id so a single cache entry holds the union of fields.
-  const seenUsers = new Map();
+  // Index sideloaded users / topics by id so the user-badge resource can
+  // inline them as plain attribute values (see `userBadgeResource`).
+  const usersById = new Map();
   for (const raw of [
     ...(payload.users ?? []),
     ...(payload.granted_bies ?? []),
   ]) {
-    if (!seenUsers.has(raw.id)) {
-      seenUsers.set(raw.id, userResource(raw));
+    if (!usersById.has(raw.id)) {
+      usersById.set(raw.id, raw);
     }
   }
-  for (const resource of seenUsers.values()) {
-    included.push(resource);
-  }
-
+  const topicsById = new Map();
   for (const raw of payload.topics ?? []) {
-    included.push(topicResource(raw));
+    topicsById.set(raw.id, raw);
   }
+  const lookup = {
+    user: (id) => usersById.get(id),
+    topic: (id) => topicsById.get(id),
+  };
 
   if (payload.user_badge) {
-    return { data: userBadgeResource(payload.user_badge), included };
+    return { data: userBadgeResource(payload.user_badge, lookup), included };
   }
 
   const wrapper = payload.user_badge_info;
   const rawUserBadges = wrapper?.user_badges ?? payload.user_badges ?? [];
   const doc = {
-    data: rawUserBadges.map(userBadgeResource),
+    data: rawUserBadges.map((ub) => userBadgeResource(ub, lookup)),
     included,
   };
   if (wrapper) {
@@ -197,39 +185,11 @@ export function normalizeUserBadgesPayload(payload) {
 // embedded `details` object of a topic-view payload. The parent topic's id
 // becomes the topic-details identity (one details per topic).
 export function normalizeTopicDetailsPayload({ topicId, details }) {
-  const included = [];
-  const relationships = {};
-
-  if (details.allowed_users) {
-    relationships.allowed_users = {
-      data: details.allowed_users.map((u) => ({
-        type: "user",
-        id: String(u.id),
-      })),
-    };
-    for (const raw of details.allowed_users) {
-      included.push(userResource(raw));
-    }
-  }
-  if (details.allowed_groups) {
-    relationships.allowed_groups = {
-      data: details.allowed_groups.map((g) => ({
-        type: "group",
-        id: String(g.id),
-      })),
-    };
-    for (const raw of details.allowed_groups) {
-      included.push(groupResource(raw));
-    }
-  }
-
   return {
     data: {
       type: "topic-details",
       id: String(topicId),
       attributes: pickSchemaAttributes(details, TopicDetailsSchema),
-      relationships,
     },
-    included,
   };
 }

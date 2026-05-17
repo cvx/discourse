@@ -21,7 +21,7 @@ export function findUserBadgesByUsername(username, opts = {}) {
     url: `/user-badges/${encodeURIComponent(username)}.json${query}`,
     method: "GET",
     op: "query",
-    normalize: normalizeUserBadgesPayload,
+    options: { normalize: normalizeUserBadgesPayload },
   };
 }
 
@@ -35,7 +35,7 @@ export function findUserBadgesByBadgeId(badgeId, opts = {}) {
     url: `/user_badges.json${query}`,
     method: "GET",
     op: "query",
-    normalize: normalizeUserBadgesPayload,
+    options: { normalize: normalizeUserBadgesPayload },
   };
 }
 
@@ -43,9 +43,11 @@ export function grantUserBadge(badgeId, username, reason) {
   return {
     url: `/user_badges`,
     method: "POST",
-    body: { username, badge_id: badgeId, reason },
     op: "createRecord",
-    normalize: normalizeUserBadgesPayload,
+    options: {
+      body: { username, badge_id: badgeId, reason },
+      normalize: normalizeUserBadgesPayload,
+    },
   };
 }
 

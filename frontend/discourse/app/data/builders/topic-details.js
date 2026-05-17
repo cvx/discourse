@@ -2,7 +2,7 @@ export function updateTopicNotificationLevel(topicId, level) {
   return {
     url: `/t/${encodeURIComponent(topicId)}/notifications`,
     method: "POST",
-    body: { notification_level: level },
+    options: { body: { notification_level: level } },
   };
 }
 
@@ -10,7 +10,7 @@ export function removeAllowedTopicGroup(topicId, name) {
   return {
     url: `/t/${encodeURIComponent(topicId)}/remove-allowed-group`,
     method: "PUT",
-    body: { name },
+    options: { body: { name } },
   };
 }
 
@@ -18,6 +18,6 @@ export function removeAllowedTopicUser(topicId, username) {
   return {
     url: `/t/${encodeURIComponent(topicId)}/remove-allowed-user`,
     method: "PUT",
-    body: { username },
+    options: { body: { username } },
   };
 }

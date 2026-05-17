@@ -1,9 +1,9 @@
-import { withDefaults } from "@warp-drive/core/reactive";
+import { withDefaults } from "@warp-drive/legacy/model/migration-support";
 
 export const BadgeTypeSchema = withDefaults({
   type: "badge-type",
   fields: [
-    { kind: "field", name: "name" },
-    { kind: "field", name: "sort_order" },
+    { kind: "attribute", name: "name" },
+    { kind: "attribute", name: "sort_order" },
   ],
 });

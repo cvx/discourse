@@ -8,12 +8,20 @@ const discourseRestHandler = {
     }
 
     const ajaxOptions = { type: (request.method ?? "GET").toUpperCase() };
-    if (request.body !== undefined && request.body !== null) {
-      ajaxOptions.data = request.body;
+    const body = request.options?.body;
+    if (body !== undefined && body !== null) {
+      ajaxOptions.data = body;
     }
 
     const raw = await ajax(request.url, ajaxOptions);
-    return { content: request.normalize ? request.normalize(raw) : raw };
+    const normalize = request.options?.normalize;
+    if (normalize) {
+      return normalize(raw);
+    }
+    // For requests without a normalizer (delete, custom actions) there is no
+    // meaningful resource document to push. `{ data: null }` keeps the cache
+    // validator happy when the CacheHandler tries to ingest the response.
+    return { data: null };
   },
 };
 

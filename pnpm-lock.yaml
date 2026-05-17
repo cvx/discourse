@@ -263,13 +263,6 @@ importers:
       '@json-editor/json-editor':
         specifier: 2.15.2
         version: 2.15.2
-<<<<<<< HEAD
-      '@jsquash/jpeg':
-        specifier: ^1.6.0
-        version: 1.6.0
-      '@jsquash/resize':
-        specifier: ^2.1.0
-        version: 2.1.1
       '@warp-drive/core':
         specifier: 5.9.0-alpha.15
         version: 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)
@@ -279,8 +272,12 @@ importers:
       '@warp-drive/json-api':
         specifier: 5.9.0-alpha.15
         version: 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7))
-=======
->>>>>>> d1894ab17f75b6fbd9b223bb29d5f8a8652aa9b4
+      '@warp-drive/legacy':
+        specifier: 5.9.0-alpha.15
+        version: 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7))(@warp-drive/utilities@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)))
+      '@warp-drive/utilities':
+        specifier: 5.9.0-alpha.15
+        version: 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7))
       ace-builds:
         specifier: ^1.43.6
         version: 1.43.6
@@ -3366,6 +3363,17 @@ packages:
 
   '@warp-drive/json-api@5.9.0-alpha.15':
     resolution: {integrity: sha512-LgPHAd3QavtnNMBJzRghLX1jHci3sb4mbl01G9/29fxgpCS/baFFg7ANx3s14m2H3Cjg5+bktEdEAKXsqib92A==}
+    peerDependencies:
+      '@warp-drive/core': 5.9.0-alpha.15
+
+  '@warp-drive/legacy@5.9.0-alpha.15':
+    resolution: {integrity: sha512-69Y/04GC66zpZn6bxjKwcHRkJBMHaZf4xFS4KoKT6MIRKO+JW53DO2ixH3tZP7Zksrbtyaka8vq0HXPbOzrGWg==}
+    peerDependencies:
+      '@warp-drive/core': 5.9.0-alpha.15
+      '@warp-drive/utilities': 5.9.0-alpha.15
+
+  '@warp-drive/utilities@5.9.0-alpha.15':
+    resolution: {integrity: sha512-de/7szw8Qaz6rVv4mxQ3L00iKMhGHlRgTdiOYhq74PEGFrqSdv91sdVB+WOVjVhSdCrvs06FoUhkSZQ0Us/jxQ==}
     peerDependencies:
       '@warp-drive/core': 5.9.0-alpha.15
 
@@ -12056,7 +12064,7 @@ snapshots:
       '@embroider/macros': 1.20.2(@babel/core@7.29.0)(@glint/template@1.7.7)
       babel-import-util: 2.1.1
       babel-plugin-debug-macros: 2.0.0(@babel/core@7.29.0)
-      semver: 7.7.4
+      semver: 7.8.0
     transitivePeerDependencies:
       - '@babel/core'
       - '@glint/template'
@@ -12087,6 +12095,25 @@ snapshots:
       '@warp-drive/core': 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)
       fuse.js: 7.1.0
       json-to-ast: 2.1.0
+    transitivePeerDependencies:
+      - '@babel/core'
+      - '@glint/template'
+      - supports-color
+
+  '@warp-drive/legacy@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7))(@warp-drive/utilities@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)))':
+    dependencies:
+      '@embroider/macros': 1.20.2(@babel/core@7.29.0)(@glint/template@1.7.7)
+      '@warp-drive/core': 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)
+      '@warp-drive/utilities': 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7))
+    transitivePeerDependencies:
+      - '@babel/core'
+      - '@glint/template'
+      - supports-color
+
+  '@warp-drive/utilities@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)(@warp-drive/core@5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7))':
+    dependencies:
+      '@embroider/macros': 1.20.2(@babel/core@7.29.0)(@glint/template@1.7.7)
+      '@warp-drive/core': 5.9.0-alpha.15(@babel/core@7.29.0)(@glint/template@1.7.7)
     transitivePeerDependencies:
       - '@babel/core'
       - '@glint/template'
@@ -12485,7 +12512,7 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.0(supports-color@8.1.1)
       babel-import-util: 2.1.1
-      semver: 7.7.4
+      semver: 7.8.0
 
   babel-plugin-ember-data-packages-polyfill@0.1.2:
     dependencies:

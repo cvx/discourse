@@ -9,25 +9,26 @@ export default class WarpRestModel {
   // Subclass must set:
   //   static type             — schema type, e.g. "badge"
   //   static normalize        — function: rooted JSON → JSON:API document
-  //   static builders         — { list(opts), one(id) }
-
+  //   static builders         — { list(opts), one(id), save(badge, data), delete(id) }
   static type = null;
   static normalize = null;
   static builders = null;
 
   // ---- Static shims (preserve `Klass.findAll` / `findById` / `createFromJson` / `create` API)
+
   static async findAll(opts) {
     const store = warpStoreFor(this);
-    const result = await store.request(this.builders.list(opts));
-    const data = result.content?.data ?? result.data ?? [];
-    return data.map((resource) => new this(resource));
+    const { content } = await store.request(this.builders.list(opts));
+    return attachMeta(
+      (content?.data ?? []).map((resource) => new this(resource)),
+      content?.meta
+    );
   }
 
   static async findById(id) {
     const store = warpStoreFor(this);
-    const result = await store.request(this.builders.one(id));
-    const data = result.content?.data ?? result.data;
-    return new this(data);
+    const { content } = await store.request(this.builders.one(id));
+    return new this(content?.data);
   }
 
   // Used by callers like User.create / Post#badgesGranted / preloaded route models.
@@ -37,19 +38,31 @@ export default class WarpRestModel {
 
     if (Array.isArray(document.data)) {
       const records = store.push(document);
-      return records.map((r) => new this(r));
+      return attachMeta(
+        records.map((r) => new this(r)),
+        document.meta
+      );
     }
-
-    const record = store.push(document);
-    return new this(record);
+    return new this(store.push(document));
   }
 
-  // attribute bag without ingesting into the cache. `save()` is out of scope and throws.
+  // Used by the old store's `createRecord("badge", { ... })` factory path —
+  // returns a draft wrapper whose `__resource` is a plain attrs bag (not a
+  // cached LegacyMode record). `save()` swaps in the cached record after the
+  // server response arrives.
   static create(attrs = {}) {
-    return new this({ ...attrs, __isLocalDraft: true });
+    const wrapper = new this({ ...attrs });
+    wrapper.__isLocalDraft = true;
+    return wrapper;
   }
 
   #resource;
+
+  // Drafts (returned from `Klass.create(attrs)`) hold a plain attrs bag as
+  // `__resource` until `save()` swaps in the cached LegacyMode record. The
+  // marker lives on the wrapper rather than on `__resource` because cached
+  // records reject any field not declared in their schema.
+  __isLocalDraft = false;
 
   constructor(resource) {
     this.#resource = resource;
@@ -59,8 +72,8 @@ export default class WarpRestModel {
     return this.#resource;
   }
 
-  // Ember-style dotted-path getter for backward compatibility with callers
-  // that still use `record.get("foo.bar")` instead of property access.
+  // ---- Ember-style legacy accessors
+
   get(path) {
     if (typeof path !== "string") {
       return undefined;
@@ -75,8 +88,18 @@ export default class WarpRestModel {
     return value;
   }
 
-  // Ember-style multi-key getter. Accepts varargs or a single array, matching
-  // `@ember/object#getProperties`. Used by route `serialize()` and similar.
+  set(key, value) {
+    // For drafts, mutate the attrs bag directly so subsequent reads see the
+    // new value. For LegacyMode cache records, write through the prototype
+    // setter (which delegates to the record's own field).
+    if (this.__isLocalDraft) {
+      this.__resource[key] = value;
+      return value;
+    }
+    this[key] = value;
+    return value;
+  }
+
   getProperties(...keys) {
     if (keys.length === 1 && Array.isArray(keys[0])) {
       keys = keys[0];
@@ -88,21 +111,52 @@ export default class WarpRestModel {
     return out;
   }
 
+  setProperties(hash) {
+    if (!hash) {
+      return hash;
+    }
+    for (const key of Object.keys(hash)) {
+      this.set(key, hash[key]);
+    }
+    return hash;
+  }
+
+  // ---- Lifecycle
+
+  updateFromJson(json) {
+    if (json == null) {
+      return this;
+    }
+    const Klass = this.constructor;
+    const store = warpStoreFor(Klass);
+    const document = Klass.normalize(json);
+    if (!document || Array.isArray(document.data)) {
+      return this;
+    }
+    store.push(document);
+    const id = document.data?.id;
+    if (id != null) {
+      const cached = store.peekRecord({ type: Klass.type, id });
+      if (cached && cached !== this.#resource) {
+        this.#resource = cached;
+        this.__isLocalDraft = false;
+      }
+    }
+    return this;
+  }
+
   async save(data) {
     const Klass = this.constructor;
     const store = warpStoreFor(Klass);
     const result = await store.request(Klass.builders.save(this, data));
 
-    // The CacheHandler has already ingested the normalized response. For a
-    // draft that didn't have an id, the wrapper's `__resource` is still the
-    // plain attrs bag — swap it to the cached record so subsequent reads go
-    // through the cache.
     const doc = result.content;
     const id = doc?.data?.id;
     if (id != null) {
       const cached = store.peekRecord({ type: Klass.type, id });
       if (cached && cached !== this.#resource) {
         this.#resource = cached;
+        this.__isLocalDraft = false;
       }
     }
     return this;
@@ -118,28 +172,41 @@ export default class WarpRestModel {
     await store.request(Klass.builders.delete(id));
   }
 
-  // Pushes a partial attribute update into the cache for this record's
-  // identity. Used by field setters and by instance methods that want to
-  // reflect a server-confirmed change locally.
-  _pushAttributes(attributes) {
+  // If a cache record now exists for this wrapper's id, swap `__resource` to
+  // it. Used after `store.push` for an optimistic update on a draft so that
+  // subsequent reads from the wrapper reflect the pushed attributes.
+  _adoptCacheRecord() {
     const Klass = this.constructor;
     const id = this.id;
     if (id == null) {
       return;
     }
-    const store = warpStoreFor(Klass);
-    store.push({
-      data: { type: Klass.type, id: String(id), attributes },
+    const cached = warpStoreFor(Klass).peekRecord({
+      type: Klass.type,
+      id: String(id),
     });
+    if (cached && cached !== this.#resource) {
+      this.#resource = cached;
+      this.__isLocalDraft = false;
+    }
   }
 }
 
+// Surface document-level `meta` keys (grant_count, username, ...) as
+// properties on the returned array so legacy callers can read them directly.
+export function attachMeta(records, meta) {
+  if (meta) {
+    Object.assign(records, meta);
+  }
+  return records;
+}
+
 // Define accessors on Klass.prototype for each schema field (and the identity
-// key). Scalar `kind: "field"` fields get both a getter and a setter — the
-// setter pushes a partial attribute update so Ember-style
-// `setProperties({"foo.bar": value})` path-walking lands a write in the cache.
-// Relationship fields (belongsTo, hasMany) get a getter only; their cached
-// representation isn't reassignable through a simple value swap.
+// key). Each reads/writes through `this.__resource`:
+//   - For LegacyMode cache records the underlying field is mutable, so a
+//     write lands as a normal property assignment.
+//   - For drafts the attrs bag is a plain object — same property assignment
+//     works.
 // Explicit getters declared in the subclass body are preserved (they show up
 // as own props on the prototype before this runs).
 export function defineFieldForwarders(Klass, schema) {
@@ -154,7 +221,11 @@ export function defineFieldForwarders(Klass, schema) {
     }
   }
   for (const [name, kind] of fieldKinds) {
-    if (Object.prototype.hasOwnProperty.call(proto, name)) {
+    // Skip if already defined anywhere on the prototype chain — catches the
+    // subclass's own getters (image, url, ...) and base-class methods (save,
+    // destroy, get, set, ...) that would otherwise be shadowed by
+    // legacy-derived schema fields with the same name.
+    if (name in proto) {
       continue;
     }
     const descriptor = {
@@ -163,9 +234,28 @@ export function defineFieldForwarders(Klass, schema) {
         return this.__resource?.[name];
       },
     };
-    if (kind === "field") {
+    // Identity getter: JSON:API stringifies ids in the cache, but the rest of
+    // the Discourse codebase compares them to numeric route params, etc.
+    // Coerce numeric strings back to numbers so `badge.id === 1126` keeps
+    // working at call sites.
+    if (kind === "@id") {
+      descriptor.get = function () {
+        const raw = this.__resource?.[name];
+        if (typeof raw !== "string") {
+          return raw;
+        }
+        const num = Number(raw);
+        return Number.isFinite(num) && String(num) === raw ? num : raw;
+      };
+    }
+    // Relationships are read-only through the wrapper — assigning them
+    // through the prototype setter wouldn't have meaningful semantics.
+    // Scalars get a passthrough setter.
+    if (kind === "attribute") {
       descriptor.set = function (value) {
-        this._pushAttributes({ [name]: value });
+        if (this.__resource) {
+          this.__resource[name] = value;
+        }
       };
     }
     Object.defineProperty(proto, name, descriptor);

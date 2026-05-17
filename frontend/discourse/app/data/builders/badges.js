@@ -6,41 +6,40 @@ export function findBadges(opts = {}) {
     url: `/badges.json${params}`,
     method: "GET",
     op: "query",
-    normalize: normalizeBadgesPayload,
+    options: { normalize: normalizeBadgesPayload },
   };
 }
 
 export function findBadge(id) {
   return {
-    url: `/badges/${encodeURIComponent(id)}.json`,
+    url: `/badges/${encodeURIComponent(id)}`,
     method: "GET",
     op: "findRecord",
-    normalize: normalizeBadgesPayload,
+    options: { normalize: normalizeBadgesPayload },
   };
 }
 
 export function saveBadge(badge, data) {
   if (badge.id != null) {
     return {
-      url: `/admin/badges/${badge.id}.json`,
+      url: `/admin/badges/${badge.id}`,
       method: "PUT",
-      body: data,
       op: "updateRecord",
-      normalize: normalizeBadgesPayload,
+      data: { type: "badge", id: String(badge.id) },
+      options: { body: data, normalize: normalizeBadgesPayload },
     };
   }
   return {
-    url: `/admin/badges.json`,
+    url: `/admin/badges`,
     method: "POST",
-    body: data,
     op: "createRecord",
-    normalize: normalizeBadgesPayload,
+    options: { body: data, normalize: normalizeBadgesPayload },
   };
 }
 
 export function deleteBadge(id) {
   return {
-    url: `/admin/badges/${id}.json`,
+    url: `/admin/badges/${id}`,
     method: "DELETE",
     op: "deleteRecord",
     data: { type: "badge", id: String(id) },
