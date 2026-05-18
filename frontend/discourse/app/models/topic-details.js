@@ -14,19 +14,12 @@ import {
 } from "discourse/data/warp-rest-model";
 import User from "discourse/models/user";
 
-/**
- * A topic's details (allowed users/groups, can_* permissions, notification
- * level, etc.). Loaded as part of the topic-view payload rather than from a
- * dedicated endpoint — its identity is the parent topic's id.
- */
 export default class TopicDetails extends RestCompatModel {
   static type = "topic-details";
 
-  // Old-store entry point: `store.createRecord("topicDetails", { id, topic, ...attrs })`.
-  // Returns a wrapper bound to the topic id. Any additional attrs (e.g.
-  // `allowed_users` passed directly by a test or by `topic.details = {...}`)
-  // are stashed in a draft bag that the wrapper reads/writes through until
-  // the cache record materializes.
+  // `store.createRecord("topicDetails", { id, topic, ...attrs })` entry point.
+  // Extras (e.g. tests doing `topic.details = { allowed_users: [...] }`) land
+  // in `#draft` until `updateFromJson` populates the cache record.
   static create({ id, topic, ...rest } = {}) {
     const td = new this(id);
     if (topic !== undefined) {
@@ -49,10 +42,8 @@ export default class TopicDetails extends RestCompatModel {
     this.#topicId = topicId == null ? null : String(topicId);
   }
 
-  // Topic's `_details` field initializer runs before Topic.id has been
-  // assigned, so the wrapper is constructed with a null topicId. We back-fill
-  // from `this.topic.id` lazily — Topic.create later sets the id, and any
-  // subsequent access resolves it.
+  // Topic's `_details` field initializer runs before Topic.id is assigned, so
+  // back-fill lazily from `this.topic.id` on first access.
   #effectiveTopicId() {
     if (this.#topicId == null && this.topic?.id != null) {
       this.#topicId = String(this.topic.id);
@@ -64,11 +55,8 @@ export default class TopicDetails extends RestCompatModel {
     return this.#effectiveTopicId();
   }
 
-  // The cache resource is materialized lazily — at construction time the
-  // details haven't loaded yet. Re-reading each access keeps the wrapper in
-  // sync with the cache when `updateFromJson` (or any partial push) lands.
-  // Falls back to the draft bag so attrs passed to `create({...})` (or
-  // assigned before `updateFromJson` arrives) are readable / writable.
+  // Falls back to `#draft` so attrs set via `create({...})` (or assigned
+  // before `updateFromJson`) are readable/writable.
   get __resource() {
     const id = this.#effectiveTopicId();
     if (id != null) {
@@ -83,13 +71,8 @@ export default class TopicDetails extends RestCompatModel {
     return this.#draft;
   }
 
-  // Topic invokes this when the topic-view JSON arrives (and on subsequent
-  // refreshes). Pushes a full normalized doc; subsequent calls merge.
-  //
-  // Wraps raw user/participant sideloads as `User` / `EmberObject` instances
-  // before pushing into the cache so callers can do `instanceof User` and
-  // access EmberObject methods like `get("username")`. Matches the legacy
-  // RestModel behavior (see git log @ 3a892292d51).
+  // Wraps user/participant sideloads to match legacy RestModel behavior so
+  // `instanceof User` and EmberObject methods keep working.
   updateFromJson(details) {
     const id = this.#effectiveTopicId();
     if (id == null || !details) {
@@ -114,8 +97,6 @@ export default class TopicDetails extends RestCompatModel {
     const store = warpStoreFor(this.constructor);
     const id = this.#effectiveTopicId();
     return store.request(updateTopicNotificationLevel(id, level)).then(() => {
-      // LegacyMode records are mutable — assign through the field
-      // forwarders directly.
       this.notification_level = level;
       this.notifications_reason_id = null;
     });

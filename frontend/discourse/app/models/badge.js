@@ -20,10 +20,8 @@ export default class Badge extends RestCompatModel {
     delete: deleteBadge,
   };
 
-  // For cached records, the relation comes back through the belongsTo
-  // (`badge_type.id`). For drafts created via `Badge.create` the wrapper's
-  // `__resource` is a plain attrs bag that holds `badge_type_id` directly —
-  // LegacyMode records would throw on a non-schema field, so we branch.
+  // Drafts hold the FK directly; cached records expose it via the belongsTo
+  // (`badge_type.id`) since LegacyMode rejects reading non-schema fields.
   get badge_type_id() {
     if (this.__isLocalDraft) {
       return this.__resource.badge_type_id;
@@ -38,8 +36,7 @@ export default class Badge extends RestCompatModel {
     return this.__resource?.badge_grouping?.id;
   }
 
-  // The `icon-or-image` helper reads `badge.image` and prefers it over `icon`
-  // when present. Preserved as a read-only alias for `image_url`.
+  // The `icon-or-image` helper reads `badge.image`.
   get image() {
     return this.image_url;
   }

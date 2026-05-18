@@ -9,9 +9,7 @@ export const BadgeGroupingSchema = withDefaults({
       "description",
       "position",
       "system",
-      // i18n-aware display name. Pre-computed at normalize time because the
-      // server doesn't ship it; preserves the legacy `BadgeGrouping#displayName`
-      // surface that templates read.
+      // Server doesn't ship `displayName` — populated at normalize time via i18n.
       "displayName"
     ),
   ],

@@ -20,8 +20,7 @@ export const BadgeSchema = withDefaults({
       "multiple_grant",
       "manually_grantable",
       "system",
-      // Admin-only attributes (AdminBadgeSerializer). Always declared so the
-      // cache preserves them when an admin payload arrives.
+      // AdminBadgeSerializer-only — declared so the cache preserves them.
       "query",
       "trigger",
       "target_posts",

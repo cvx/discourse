@@ -59,8 +59,8 @@ function badgeGroupingResource(raw) {
 
 function userBadgeResource(raw, lookup, includedIds) {
   const attributes = pickSchemaAttributes(raw, UserBadgeSchema);
-  // Inline the user/topic sideloads as plain attribute values so consumers
-  // get plain JS objects (with arbitrary fields) rather than cached records.
+  // Inline sideloads as plain objects so templates can read arbitrary fields
+  // without hitting LegacyMode's strict schema check on cached records.
   if (raw.user_id != null) {
     attributes.user = lookup.user(raw.user_id);
   }
@@ -81,10 +81,6 @@ function userBadgeResource(raw, lookup, includedIds) {
   };
 }
 
-// Collects the badge-adjacent sideloads (badge_types, badge_groupings) into
-// the JSON:API `included` array. Used by both badge and user-badge payloads;
-// the caller decides where the badges themselves go (primary `data` for badge
-// payloads, `included` for user-badge payloads).
 function collectBadgeMetaIncluded(payload, included) {
   for (const raw of payload.badge_types ?? []) {
     included.push(badgeTypeResource(raw));
@@ -94,13 +90,11 @@ function collectBadgeMetaIncluded(payload, included) {
   }
 }
 
-// Accepts either:
+// Accepts:
 //   { badge: {...},  badge_types: [...], badge_groupings?: [...] }   (show)
 //   { badges: [...], badge_types: [...], badge_groupings: [...] }    (index)
-// Returns a JSON:API document: { data, included }. Empty / unrecognized
-// payloads (e.g. an empty response body after a save) produce `{ data: null }`
-// (without `included`, which JSON:API forbids when data is null), which the
-// cache validator accepts as a no-op.
+// Empty / unrecognized payloads return `{ data: null }` (no `included` —
+// JSON:API forbids it when data is null).
 export function normalizeBadgesPayload(payload) {
   if (!payload) {
     return { data: null };
@@ -121,28 +115,24 @@ export function normalizeBadgesPayload(payload) {
   return { data: null };
 }
 
-// Accepts any of:
+// Accepts:
 //   { user_badge: {...}, badges, badge_types, users, topics, granted_bies }      (grant POST)
 //   { user_badges: [...], badges, badge_types, users, topics, granted_bies }     (findByUsername)
 //   { user_badge_info: { user_badges, grant_count, username }, badges, ... }     (findByBadgeId)
-// Returns { data, included, meta? }.
 export function normalizeUserBadgesPayload(payload) {
   if (!payload) {
     return { data: null };
   }
   const included = [];
   collectBadgeMetaIncluded(payload, included);
-  // Compute the type/id set BEFORE pushing sideloaded badges so each badge's
-  // relationships only reference badge-type / badge-grouping resources we
-  // actually included.
+  // Index BEFORE pushing sideloaded badges so each badge's relationships only
+  // reference badge-type / badge-grouping resources we actually included.
   const badgeRelIds = indexIncluded(included);
   for (const raw of payload.badges ?? []) {
     included.push(badgeResource(raw, badgeRelIds));
   }
   const includedIds = indexIncluded(included);
 
-  // Index sideloaded users / topics by id so the user-badge resource can
-  // inline them as plain attribute values (see `userBadgeResource`).
   const usersById = new Map();
   for (const raw of [
     ...(payload.users ?? []),
@@ -183,9 +173,6 @@ export function normalizeUserBadgesPayload(payload) {
   return doc;
 }
 
-// Builds a JSON:API document for a single TopicDetails record from the
-// embedded `details` object of a topic-view payload. The parent topic's id
-// becomes the topic-details identity (one details per topic).
 export function normalizeTopicDetailsPayload({ topicId, details }) {
   return {
     data: {

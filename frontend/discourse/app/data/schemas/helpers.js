@@ -1,13 +1,5 @@
-// Small construction helpers for WarpDrive schema definitions. They collapse
-// the boilerplate of `{ kind: "attribute", name: "..." }` and the verbose
-// `belongsTo` object form. Compose into the `fields` array passed to
-// `withDefaults(...)` in each `data/schemas/*.js` file.
-//
-// `withDefaults` is re-exported so each schema file has a single import for
-// schema construction. Schemas annotate their export with `@type {LegacyResourceSchema}`
-// to anchor the emitted `.d.ts` (TS2883 otherwise — TS resolves the inferred
-// return type through pnpm's internal `.pnpm/...` path).
-
+// Schemas annotate their export with `@type {LegacyResourceSchema}` so the
+// emitted `.d.ts` doesn't anchor through pnpm's `.pnpm/...` path (TS2883).
 export { withDefaults } from "@warp-drive/legacy/model/migration-support";
 
 export function attrs(...names) {

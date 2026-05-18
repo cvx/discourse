@@ -1,17 +1,8 @@
-// Shared scaffolding for per-resource builders. Each helper returns a
-// request object in the shape the DiscourseRestHandler / WarpDrive
-// RequestManager expects:
-//
-//   { url, method, op?, data?, options: { body?, normalize? } }
-//
-// The `op` and `data: { type, id }` fields let WarpDrive's CacheHandler
-// associate the request with a cached record. RPC-style endpoints (toggle,
-// notification update, remove-allowed-user) don't fit a CRUD operation and
-// should be expressed as plain inline request objects — see `topic-details.js`.
+// CRUD shorthands for per-resource builders. RPC-style endpoints (toggles,
+// notification updates, remove-allowed-X) skip these and use plain inline
+// request objects — they don't fit the CRUD shape.
 
-// Serialize a flat params object into a URL query string, dropping
-// null / undefined / empty entries and URL-encoding both keys and values.
-// Returns "" (not "?") when there are no params.
+// Drops null / undefined / empty entries. Returns "" (not "?") when empty.
 export function buildQuery(params) {
   const entries = Object.entries(params).filter(
     ([, v]) => v != null && v !== ""

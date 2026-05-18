@@ -1,7 +1,4 @@
-// RPC-style endpoints for topic-details — these don't fit a CRUD shape (no
-// resource is being created / updated / deleted at a stable identity, and
-// the responses aren't full normalized payloads), so they're expressed as
-// plain inline request objects rather than using the `helpers.js` builders.
+// RPC-style endpoints; not CRUD, so they bypass `helpers.js`.
 
 export function updateTopicNotificationLevel(topicId, level) {
   return {

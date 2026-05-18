@@ -1,15 +1,10 @@
 import { attrs, withDefaults } from "./helpers";
 
-// TopicDetails is a sub-resource owned by a Topic. Its identity is the
-// parent topic's id (one details per topic), and it ships embedded in the
-// topic show payload rather than being fetched on its own.
+// Sub-resource owned by a Topic; identity = parent topic's id. Ships embedded
+// in the topic-view payload, not fetched standalone.
 //
-// `created_by`, `last_poster`, `participants`, `links`, `allowed_users`, and
-// `allowed_groups` are modeled as plain attributes (opaque arrays / objects)
-// rather than relationships. Their related models aren't migrated yet, so
-// LegacyMode would throw on unknown fields read from cached records.
-// Templates iterating these expect plain objects with `username` / `name`,
-// which the raw sideload payload already provides.
+// `created_by`, `last_poster`, `participants`, `links`, `allowed_users`,
+// `allowed_groups` are opaque attributes — their target models aren't migrated.
 /** @type {import("@warp-drive/core/types/schema/fields").LegacyResourceSchema} */
 export const TopicDetailsSchema = withDefaults({
   type: "topic-details",

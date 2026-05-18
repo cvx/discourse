@@ -1,20 +1,9 @@
 import WarpRestModel from "discourse/data/warp-rest-model";
 
-// Legacy compatibility layer for models that still need to slot into
-// Discourse's old `Store` + `RestModel` API surface. Adds:
-//
-//   - `Klass.create(attrs)` → returns a *draft* wrapper whose `__resource`
-//     is a plain attrs bag rather than a cached LegacyMode record. Used by
-//     `store.createRecord("badge", {...})`, factory-style construction, and
-//     pre-cached payload ingestion.
-//   - `__isLocalDraft` instance flag — true until `save()` / `updateFromJson()`
-//     swaps in the cached record. The marker lives on the wrapper because
-//     cached LegacyMode records reject any field not declared in their schema.
-//   - Ember-style accessors: `get(path)`, `set(key, value)`, `getProperties`,
-//     `setProperties`. Templates and helpers across Discourse still use these.
-//
-// When a model's callers have all migrated away from these idioms, the model
-// can switch its `extends` to `WarpRestModel` directly and drop the compat.
+// Bridges Discourse's legacy `Store` + `RestModel` callsites to WarpRestModel.
+// Drop this layer (extend WarpRestModel directly) once a model's callers no
+// longer use `.get(path)` / `.set(...)` / `.setProperties(...)` /
+// `store.createRecord("foo", attrs)`.
 export default class RestCompatModel extends WarpRestModel {
   static create(attrs = {}) {
     const wrapper = new this({ ...attrs });
@@ -22,6 +11,9 @@ export default class RestCompatModel extends WarpRestModel {
     return wrapper;
   }
 
+  // True until `save()` / `updateFromJson()` swaps in the cached record. The
+  // flag lives on the wrapper because cached LegacyMode records reject any
+  // field not declared in their schema.
   __isLocalDraft = false;
 
   _didReplaceResource() {
@@ -43,9 +35,8 @@ export default class RestCompatModel extends WarpRestModel {
   }
 
   set(key, value) {
-    // For drafts, mutate the attrs bag directly so subsequent reads see the
-    // new value. For LegacyMode cache records, write through the prototype
-    // setter (which delegates to the record's own field).
+    // Drafts: mutate the attrs bag directly. Cached records: route through
+    // the prototype setter, which writes to the record's own field.
     if (this.__isLocalDraft) {
       this.__resource[key] = value;
       return value;

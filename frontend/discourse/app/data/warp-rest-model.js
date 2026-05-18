@@ -5,15 +5,11 @@ export function warpStoreFor(klass) {
   return owner.lookup("service:warp-store");
 }
 
-// Pure WarpDrive integration base. Knows about schemas, the WarpDrive
-// request/cache pipeline, and the lifecycle of a single wrapped resource.
-// Does NOT know about Ember's EmberObject API (`get`/`set`/`setProperties`)
-// or the legacy `Klass.create(attrs)`-returns-draft contract — those live in
-// `rest-compat.js` for callers that still need them.
+// Pure WarpDrive base. Ember/RestModel-API shims live in `rest-compat.js`.
 //
 // Subclass contract:
 //   static type             — schema type, e.g. "badge"
-//   static normalize        — function: rooted JSON → JSON:API document
+//   static normalize        — rooted JSON → JSON:API document
 //   static builders         — { list(opts), one(id), save(record, data), delete(id) }
 export default class WarpRestModel {
   static type = null;
@@ -28,9 +24,7 @@ export default class WarpRestModel {
     return requestOne(this, this.builders.one(id));
   }
 
-  // Synchronously ingest already-loaded JSON into the cache. Used by callers
-  // that have a preloaded payload (PreloadStore, embedded sub-payloads) and
-  // want wrappers around the resulting cache records.
+  // Synchronous ingest for preloaded payloads (PreloadStore, embedded sub-payloads).
   static createFromJson(json) {
     const store = warpStoreFor(this);
     const document = this.normalize(json);
@@ -55,10 +49,8 @@ export default class WarpRestModel {
     return this.#resource;
   }
 
-  // Internal: try to swap `__resource` to the cached record for `id`. Called
-  // after `save` / `updateFromJson` / `_adoptCacheRecord`. Subclasses can
-  // define `_didReplaceResource` to react to the swap (e.g. clear draft
-  // state in the compat layer).
+  // Swap `__resource` to the cached record for `id`. Subclasses can define
+  // `_didReplaceResource` to react (e.g. clear draft state in rest-compat).
   _adoptResource(id) {
     if (id == null) {
       return;
@@ -105,15 +97,15 @@ export default class WarpRestModel {
     await warpStoreFor(Klass).request(Klass.builders.delete(id));
   }
 
-  // Used after `store.push` for an optimistic update so the wrapper reflects
-  // the pushed attributes (matters when the wrapper started as a draft).
+  // Call after `store.push` of an optimistic update — swaps a draft wrapper
+  // to the now-cached record so subsequent reads see the pushed attributes.
   _adoptCacheRecord() {
     this._adoptResource(this.id);
   }
 }
 
-// Surface document-level `meta` keys (grant_count, username, ...) as
-// properties on the returned array so legacy callers can read them directly.
+// Attach document-level `meta` keys to the returned array so legacy callers
+// can read `result.grant_count` / `result.username` directly.
 export function attachMeta(records, meta) {
   if (meta) {
     Object.assign(records, meta);
@@ -121,9 +113,6 @@ export function attachMeta(records, meta) {
   return records;
 }
 
-// Issue a request through the warp-store and wrap each resource in `content.data`
-// (assumed to be an array) with `new Klass(...)`. Surfaces `content.meta` keys on
-// the returned array so legacy callers can read them directly.
 export async function requestMany(Klass, request) {
   const { content } = await warpStoreFor(Klass).request(request);
   return attachMeta(
@@ -132,21 +121,14 @@ export async function requestMany(Klass, request) {
   );
 }
 
-// Issue a request through the warp-store and wrap `content.data` (a single
-// resource) with `new Klass(...)`.
 export async function requestOne(Klass, request) {
   const { content } = await warpStoreFor(Klass).request(request);
   return new Klass(content?.data);
 }
 
-// Define accessors on Klass.prototype for each schema field (and the identity
-// key). Each reads/writes through `this.__resource`:
-//   - For LegacyMode cache records the underlying field is mutable, so a
-//     write lands as a normal property assignment.
-//   - For drafts (rest-compat) the attrs bag is a plain object — same
-//     property assignment works.
-// Explicit getters declared in the subclass body are preserved (they show up
-// as own props on the prototype before this runs).
+// Install prototype getters/setters reading/writing `__resource` for each
+// schema field. Subclass-defined getters (image, url, ...) take precedence —
+// they're already on the prototype when this runs.
 export function defineFieldForwarders(Klass, schema) {
   const proto = Klass.prototype;
   const fieldKinds = new Map();
@@ -159,10 +141,9 @@ export function defineFieldForwarders(Klass, schema) {
     }
   }
   for (const [name, kind] of fieldKinds) {
-    // Skip if already defined anywhere on the prototype chain — catches the
-    // subclass's own getters (image, url, ...) and base-class methods (save,
-    // destroy, get, set, ...) that would otherwise be shadowed by
-    // legacy-derived schema fields with the same name.
+    // Skip names that resolve anywhere on the prototype chain — this is what
+    // keeps subclass getters and base methods (save, get, set, ...) from
+    // being shadowed by legacy-derived schema fields of the same name.
     if (name in proto) {
       continue;
     }
@@ -172,10 +153,8 @@ export function defineFieldForwarders(Klass, schema) {
         return this.__resource?.[name];
       },
     };
-    // Identity getter: JSON:API stringifies ids in the cache, but the rest of
-    // the Discourse codebase compares them to numeric route params, etc.
-    // Coerce numeric strings back to numbers so `badge.id === 1126` keeps
-    // working at call sites.
+    // JSON:API stores ids as strings; coerce numeric ones back so
+    // `badge.id === 1126` still works at Discourse call sites.
     if (kind === "@id") {
       descriptor.get = function () {
         const raw = this.__resource?.[name];
@@ -186,9 +165,7 @@ export function defineFieldForwarders(Klass, schema) {
         return Number.isFinite(num) && String(num) === raw ? num : raw;
       };
     }
-    // Relationships are read-only through the wrapper — assigning them
-    // through the prototype setter wouldn't have meaningful semantics.
-    // Scalars get a passthrough setter.
+    // Relationships are read-only through the wrapper.
     if (kind === "attribute") {
       descriptor.set = function (value) {
         if (this.__resource) {

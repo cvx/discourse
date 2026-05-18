@@ -18,9 +18,8 @@ const discourseRestHandler = {
     if (normalize) {
       return normalize(raw);
     }
-    // For requests without a normalizer (delete, custom actions) there is no
-    // meaningful resource document to push. `{ data: null }` keeps the cache
-    // validator happy when the CacheHandler tries to ingest the response.
+    // No normalizer (delete, custom actions) — `{ data: null }` is the only
+    // shape the cache validator accepts as a no-op.
     return { data: null };
   },
 };
