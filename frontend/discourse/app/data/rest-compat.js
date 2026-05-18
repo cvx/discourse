@@ -6,6 +6,12 @@ import WarpRestModel from "discourse/data/warp-rest-model";
 // longer use `.get(path)` / `.set(...)` / `.setProperties(...)` /
 // `store.createRecord("foo", attrs)`.
 export default class RestCompatModel extends WarpRestModel {
+  // Identity by default; legacy `service:store._hydrate` calls this on cache
+  // updates. Subclasses can override to massage JSON before it lands.
+  static munge(json) {
+    return json;
+  }
+
   // Draft attrs go into a `trackedObject` so field reads/writes are reactive
   // — Glimmer templates rerender when callers do `bookmark.set("name", ...)`,
   // matching the old EmberObject behavior. Cached LegacyMode records have
