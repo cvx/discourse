@@ -3,6 +3,7 @@ import { BadgeGroupingSchema } from "./badge-grouping";
 import { BadgeTypeSchema } from "./badge-type";
 import { BookmarkSchema } from "./bookmark";
 import { TagSchema } from "./tag";
+import { TagGroupSchema } from "./tag-group";
 import { TopicDetailsSchema } from "./topic-details";
 import { UserBadgeSchema } from "./user-badge";
 
@@ -13,6 +14,7 @@ export const schemas = [
   BadgeGroupingSchema,
   BookmarkSchema,
   TagSchema,
+  TagGroupSchema,
   TopicDetailsSchema,
   UserBadgeSchema,
 ];
