@@ -43,12 +43,13 @@ export default class UserBadge extends RestCompatModel {
     return resource ? new Badge(resource) : undefined;
   }
 
-  // Getter: null → undefined (test contract). Setter: shadows on the wrapper
-  // so admin's read-then-write `groupedBadges` doesn't trip Glimmer.
+  // Getter: null → undefined (test contract).
   get granted_by() {
     return this.__resource?.granted_by ?? undefined;
   }
 
+  // Setter: shadows on the wrapper so admin's read-then-write `groupedBadges`
+  // doesn't trip Glimmer.
   set granted_by(value) {
     Object.defineProperty(this, "granted_by", {
       value,
@@ -59,15 +60,13 @@ export default class UserBadge extends RestCompatModel {
   }
 
   get grantedAt() {
-    const raw = this.granted_at;
-    return raw ? Date.parse(raw) : null;
+    return this.granted_at ? Date.parse(this.granted_at) : null;
   }
 
   get postUrl() {
     if (this.topic_title) {
       return `/t/-/${this.topic_id}/${this.post_number}`;
     }
-    return undefined;
   }
 
   // Direct ajax so admin callers can read the response body.
