@@ -1,3 +1,4 @@
+import { trackedObject } from "@ember/reactive/collections";
 import WarpRestModel from "discourse/data/warp-rest-model";
 
 // Bridges Discourse's legacy `Store` + `RestModel` callsites to WarpRestModel.
@@ -5,8 +6,12 @@ import WarpRestModel from "discourse/data/warp-rest-model";
 // longer use `.get(path)` / `.set(...)` / `.setProperties(...)` /
 // `store.createRecord("foo", attrs)`.
 export default class RestCompatModel extends WarpRestModel {
+  // Draft attrs go into a `trackedObject` so field reads/writes are reactive
+  // — Glimmer templates rerender when callers do `bookmark.set("name", ...)`,
+  // matching the old EmberObject behavior. Cached LegacyMode records have
+  // their own signal-based reactivity.
   static create(attrs = {}) {
-    const wrapper = new this({ ...attrs });
+    const wrapper = new this(trackedObject({ ...attrs }));
     wrapper.__isLocalDraft = true;
     return wrapper;
   }
