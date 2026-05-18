@@ -20,6 +20,8 @@ export const BookmarkSchema = withDefaults({
       "pinned",
       "title",
       "fancy_title",
+      "fancy_title_localized",
+      "locale",
       "excerpt",
       "bookmarkable_id",
       "bookmarkable_type",
@@ -39,6 +41,8 @@ export const BookmarkSchema = withDefaults({
       "tags_descriptions",
       "truncated",
       "post_id",
+      // Only on bookmarks embedded in topic-view payloads (TopicViewBookmarkSerializer).
+      "post_number",
       "last_read_post_number",
       "is_warning",
       "invisible",

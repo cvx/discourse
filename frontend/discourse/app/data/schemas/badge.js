@@ -20,6 +20,9 @@ export const BadgeSchema = withDefaults({
       "multiple_grant",
       "manually_grantable",
       "system",
+      // FKs alongside the relations so callers can read them directly.
+      "badge_type_id",
+      "badge_grouping_id",
       // AdminBadgeSerializer-only — declared so the cache preserves them.
       "query",
       "trigger",

@@ -20,22 +20,6 @@ export default class Badge extends RestCompatModel {
     delete: deleteBadge,
   };
 
-  // Drafts hold the FK directly; cached records expose it via the belongsTo
-  // (`badge_type.id`) since LegacyMode rejects reading non-schema fields.
-  get badge_type_id() {
-    if (this.__isLocalDraft) {
-      return this.__resource.badge_type_id;
-    }
-    return this.__resource?.badge_type?.id;
-  }
-
-  get badge_grouping_id() {
-    if (this.__isLocalDraft) {
-      return this.__resource.badge_grouping_id;
-    }
-    return this.__resource?.badge_grouping?.id;
-  }
-
   // The `icon-or-image` helper reads `badge.image`.
   get image() {
     return this.image_url;

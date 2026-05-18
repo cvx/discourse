@@ -43,9 +43,19 @@ export default class UserBadge extends RestCompatModel {
     return resource ? new Badge(resource) : undefined;
   }
 
-  // Tests assert `strictEqual(userBadge.granted_by, undefined)` on absence.
+  // Getter: null → undefined (test contract). Setter: shadows on the wrapper
+  // so admin's read-then-write `groupedBadges` doesn't trip Glimmer.
   get granted_by() {
     return this.__resource?.granted_by ?? undefined;
+  }
+
+  set granted_by(value) {
+    Object.defineProperty(this, "granted_by", {
+      value,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
   }
 
   get grantedAt() {
