@@ -1,4 +1,3 @@
-import { tracked } from "@glimmer/tracking";
 import { computed, get } from "@ember/object";
 import { withPluginApi } from "discourse/lib/plugin-api";
 import Category from "discourse/models/category";
@@ -48,23 +47,11 @@ function initialize(api) {
     { priority: -100 }
   );
 
-  api.modifyClass(
-    "model:topic",
-    (Superclass) =>
-      class extends Superclass {
-        @tracked vote_count;
-        @tracked user_voted;
-      }
-  );
-  api.modifyClass(
-    "model:user",
-    (Superclass) =>
-      class extends Superclass {
-        @tracked votes_exceeded;
-        @tracked vote_limit;
-        @tracked votes_left;
-      }
-  );
+  api.addModelField("topic", "vote_count");
+  api.addModelField("topic", "user_voted");
+  api.addModelField("user", "votes_exceeded");
+  api.addModelField("user", "vote_limit");
+  api.addModelField("user", "votes_left");
 }
 
 export default {
