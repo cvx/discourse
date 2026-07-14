@@ -64,6 +64,12 @@ module SystemHelpers
   end
 
   def setup_system_test
+    # `time:` freezes Ruby and the page's JavaScript clock, but not the browser's cookie-store
+    # clock. Persistent cookies use an absolute expiry based on Ruby time, so historical examples
+    # can create cookies the browser rejects as expired. The sign-in response still succeeds, but
+    # subsequent requests are anonymous. Browser state is reset after each example, so system tests
+    # only need session cookies.
+    SiteSetting.persistent_sessions = false
     SiteSetting.login_required = false
     SiteSetting.has_login_hint = false
     SiteSetting.global_notice = ""
@@ -153,6 +159,19 @@ module SystemHelpers
         freeze_time(&example)
       end
     end
+  end
+
+  def select_all_content(selector)
+    js = <<-JS
+      const el = document.querySelector(arguments[0]);
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    JS
+
+    page.execute_script(js, selector)
   end
 
   def select_text_range(selector, start = 0, offset = 5)

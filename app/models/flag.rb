@@ -20,8 +20,8 @@ class Flag < ActiveRecord::Base
   end
 
   def used?
-    PostAction.exists?(post_action_type_id: self.id) ||
-      ReviewableScore.exists?(reviewable_score_type: self.id)
+    PostAction.exists?(post_action_type_id: id) ||
+      ReviewableScore.exists?(reviewable_score_type: id)
   end
 
   def self.valid_applies_to_types
@@ -48,11 +48,11 @@ class Flag < ActiveRecord::Base
   end
 
   def system?
-    self.id.present? && self.id < MAX_SYSTEM_FLAG_ID
+    id.present? && id < MAX_SYSTEM_FLAG_ID
   end
 
   def applies_to?(type)
-    self.applies_to.include?(type)
+    applies_to.include?(type)
   end
 
   private
@@ -62,12 +62,25 @@ class Flag < ActiveRecord::Base
   end
 
   def set_position
-    self.position = Flag.maximum(:position).to_i + 1 if !self.position
+    self.position = Flag.maximum(:position).to_i + 1 if !position
   end
 
   def set_name_key
-    prefix = self.system? ? "" : "custom_"
-    self.name_key = "#{prefix}#{self.name.squeeze(" ").gsub(" ", "_").gsub(/[^\w]/, "").downcase}"
+    return if name_key.present? && !will_save_change_to_name?
+
+    prefix = system? ? "" : "custom_"
+    slug = name.squeeze(" ").gsub(" ", "_").gsub(/[^\w]/, "").downcase
+    base = slug.present? ? "#{prefix}#{slug}" : "#{prefix}flag"
+
+    suffix = 1
+    candidate = base
+
+    while Flag.unscoped.where(name_key: candidate).where.not(id: id).exists?
+      suffix += 1
+      candidate = "#{base}_#{suffix}"
+    end
+
+    self.name_key = candidate
   end
 end
 
@@ -88,4 +101,8 @@ end
 #  score_type       :boolean          default(FALSE), not null
 #  created_at       :datetime         not null
 #  updated_at       :datetime         not null
+#
+# Indexes
+#
+#  index_flags_on_name_key  (name_key) UNIQUE
 #

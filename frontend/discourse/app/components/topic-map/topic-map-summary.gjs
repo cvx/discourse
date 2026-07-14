@@ -71,6 +71,14 @@ export default class TopicMapSummary extends Component {
     return this.args.postStream?.summary;
   }
 
+  get shouldShowReplyCount() {
+    return this.args.topic.is_nested_view;
+  }
+
+  get replyCount() {
+    return this.args.topic.replyCount;
+  }
+
   get topRepliesTitle() {
     if (this.topRepliesSummaryEnabled) {
       return;
@@ -90,7 +98,7 @@ export default class TopicMapSummary extends Component {
   }
 
   get loneStat() {
-    if (this.args.topic.has_summary) {
+    if (this.args.topic.has_summary || this.shouldShowReplyCount) {
       return false;
     }
     return [this.hasLikes, this.hasUsers, this.hasLinks].every((stat) => !stat);
@@ -273,6 +281,15 @@ export default class TopicMapSummary extends Component {
           </DConditionalLoadingSpinner>
         </:content>
       </DMenu>
+
+      {{#if this.shouldShowReplyCount}}
+        <div class="topic-map__stat topic-map__replies">
+          {{dNumber this.replyCount noTitle="true"}}
+          <span class="topic-map__stat-label">
+            {{i18n "replies_lowercase" count=this.replyCount}}
+          </span>
+        </div>
+      {{/if}}
 
       {{#if this.hasLikes}}
         <DMenu

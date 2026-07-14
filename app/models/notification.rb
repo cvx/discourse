@@ -74,7 +74,7 @@ class Notification < ActiveRecord::Base
     # if we have manually set the notification to high_priority on create then
     # make sure that is respected
     self.high_priority =
-      self.high_priority || Notification.high_priority_types.include?(self.notification_type)
+      high_priority || Notification.high_priority_types.include?(notification_type)
   end
 
   def self.consolidate_or_create!(notification_params)
@@ -420,7 +420,7 @@ class Notification < ActiveRecord::Base
   end
 
   def unread_high_priority?
-    self.high_priority? && !read
+    high_priority? && !read
   end
 
   def post_id
@@ -429,8 +429,9 @@ class Notification < ActiveRecord::Base
 
   protected
 
-  # We build /n/ directly here rather than letting /t/ redirect because
-  # the redirect strips the query string we need (sort, collapse_replies).
+  # Consolidated nested notifications target the topic route. The Ember topic
+  # route mounts the nested view and preserves the query string we need
+  # (sort, collapse_replies).
   def consolidated_nested_replied?
     notification_type == Notification.types[:replied] && data_hash["consolidated_count"].to_i > 1 &&
       data_hash["reply_to_post_number"].present?
@@ -440,7 +441,7 @@ class Notification < ActiveRecord::Base
     bucket = data_hash["reply_to_post_number"].to_i
     slug_segment = topic.slug.present? ? "/#{topic.slug}" : ""
     bucket_segment = bucket > TOPIC_ROOT_BUCKET ? "/#{bucket}" : ""
-    "#{Discourse.base_path}/n#{slug_segment}/#{topic.id}#{bucket_segment}?sort=new&collapse_replies=true"
+    "#{Discourse.base_path}/t#{slug_segment}/#{topic.id}#{bucket_segment}?sort=new&collapse_replies=true"
   end
 
   def refresh_notification_count
@@ -451,7 +452,7 @@ class Notification < ActiveRecord::Base
     return if skip_send_email
 
     if user.do_not_disturb?
-      ShelvedNotification.create(notification_id: self.id)
+      ShelvedNotification.create(notification_id: id)
     else
       NotificationEmailer.process_notification(self)
     end

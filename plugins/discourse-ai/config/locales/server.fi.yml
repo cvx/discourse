@@ -43,7 +43,6 @@ fi:
     ai_sentiment_enabled: "Ota sävymoduuli käyttöön."
     ai_sentiment_inference_service_api_endpoint: "URL-osoite, jossa sävymoduulin API on käynnissä"
     ai_sentiment_inference_service_api_key: "Sävy-APIn API-avain"
-    ai_sentiment_models: "Päätelmien tekemiseen käytettävät mallit. Sävy luokittelee viestin positiivinen/neutraali/negatiivinen-skaalalla. Tunne luokittelee viha/inho/pelko/ilo/neutraali/suru/yllätys-skaalalla."
     ai_nsfw_detection_enabled: "Ota NSFW-moduuli käyttöön."
     ai_nsfw_inference_service_api_endpoint: "URL-osoite, jossa NSFW-moduulin API on käynnissä"
     ai_nsfw_inference_service_api_key: "NSFW-APIn API-avain"
@@ -402,6 +401,8 @@ fi:
         random_picker: "Satunnainen valitsin"
         categories: "Listaa alueet"
         flag_post: "Liputa viesti"
+        suspend_user: "Jäädytä käyttäjä"
+        silence_user: "Hiljennä käyttäjä"
         search: "Hae"
         tags: "Listaa tunnisteet"
         time: "Aika"
@@ -582,7 +583,6 @@ fi:
       removed: "poistettu"
     errors:
       quota_exceeded: "Olet ylittänyt tämän mallin kiintiön. Odota %{relative_time} ja yritä sitten uudelleen."
-      quota_required: "Sinun on määritettävä tälle mallille saneiden tai käyttökertojen enimmäismäärä"
       no_query_specified: Kyselyparametri on pakollinen, määritä se.
       no_user_specified: Parametri username tai user_unique_id vaaditaan, määritä se.
       user_not_found: Määritettyä käyttäjää ei ole olemassa. Tarkista username-parametri.

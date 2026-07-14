@@ -26,7 +26,9 @@ RSpec.describe User do
   describe ".in_any_groups?" do
     fab!(:group)
 
-    it "returns true if any of the group IDs are the 'everyone' auto group" do
+    it "returns true if any of the group IDs are the 'everyone' auto group with legacy group permissions" do
+      SiteSetting.granular_anonymous_and_logged_in_groups_permissions = false
+
       expect(user.in_any_groups?([group.id, Group::AUTO_GROUPS[:everyone]])).to eq(true)
     end
 
@@ -34,16 +36,21 @@ RSpec.describe User do
       expect(user.in_any_groups?([Group::AUTO_GROUPS[:logged_in_users]])).to eq(true)
     end
 
-    it "never returns true for the 'anonymous' auto group — logged-in users are not anonymous" do
+    it "never returns true for the 'anonymous_users' auto group — logged-in users are not anonymous" do
       GroupUser.where(user_id: Discourse::SYSTEM_USER_ID).delete_all
       Discourse.system_user.reload
-      expect(user.in_any_groups?([Group::AUTO_GROUPS[:anonymous]])).to eq(false)
-      expect(Discourse.system_user.in_any_groups?([Group::AUTO_GROUPS[:anonymous]])).to eq(false)
+      expect(user.in_any_groups?([Group::AUTO_GROUPS[:anonymous_users]])).to eq(false)
+      expect(Discourse.system_user.in_any_groups?([Group::AUTO_GROUPS[:anonymous_users]])).to eq(
+        false,
+      )
     end
 
-    it "returns true for the 'anonymous' auto group for anonymous users" do
+    it "returns true for the 'anonymous_users' auto group for anonymous users" do
       expect(
-        Guardian.new.instance_variable_get(:@user).in_any_groups?([Group::AUTO_GROUPS[:anonymous]]),
+        Guardian
+          .new
+          .instance_variable_get(:@user)
+          .in_any_groups?([Group::AUTO_GROUPS[:anonymous_users]]),
       ).to eq(true)
     end
 
@@ -66,11 +73,13 @@ RSpec.describe User do
       expect(user.in_any_groups?([Group::AUTO_GROUPS[:logged_in_users]])).to eq(true)
     end
 
-    it "never returns true for the 'anonymous' auto group — logged-in users are not anonymous" do
+    it "never returns true for the 'anonymous_users' auto group — logged-in users are not anonymous" do
       GroupUser.where(user_id: Discourse::SYSTEM_USER_ID).delete_all
       Discourse.system_user.reload
-      expect(user.in_any_groups?([Group::AUTO_GROUPS[:anonymous]])).to eq(false)
-      expect(Discourse.system_user.in_any_groups?([Group::AUTO_GROUPS[:anonymous]])).to eq(false)
+      expect(user.in_any_groups?([Group::AUTO_GROUPS[:anonymous_users]])).to eq(false)
+      expect(Discourse.system_user.in_any_groups?([Group::AUTO_GROUPS[:anonymous_users]])).to eq(
+        false,
+      )
     end
 
     context "with granular_anonymous_and_logged_in_groups_permissions enabled" do
@@ -706,6 +715,50 @@ RSpec.describe User do
     end
   end
 
+  describe "anonymous shadow users" do
+    fab!(:admin)
+    fab!(:master_user) { Fabricate(:user, trust_level: TrustLevel[3]) }
+
+    before do
+      SiteSetting.allow_anonymous_mode = true
+      SiteSetting.anonymous_posting_allowed_groups = Group::AUTO_GROUPS[:trust_level_1].to_s
+    end
+
+    it "deactivates and logs out anonymous shadow users when deactivated", :aggregate_failures do
+      shadow_user = AnonymousShadowCreator.get(master_user)
+      UserAuthToken.generate!(user_id: shadow_user.id)
+
+      messages =
+        MessageBus.track_publish("/logout/#{shadow_user.id}") { master_user.deactivate(admin) }
+
+      expect(shadow_user.reload[:active]).to eq(false)
+      expect(shadow_user.user_auth_tokens).to be_empty
+      expect(shadow_user.anonymous_user_master.reload.active).to eq(false)
+      expect(messages.size).to eq(1)
+      expect(messages[0].user_ids).to eq([shadow_user.id])
+      expect(messages[0].data).to eq(shadow_user.id)
+    end
+
+    it "suspends and logs out anonymous shadow users when suspended", :aggregate_failures do
+      freeze_time
+      shadow_user = AnonymousShadowCreator.get(master_user)
+      UserAuthToken.generate!(user_id: shadow_user.id)
+
+      messages =
+        MessageBus.track_publish("/logout/#{shadow_user.id}") do
+          master_user.update!(suspended_at: Time.zone.now, suspended_till: 1.day.from_now)
+        end
+
+      expect(shadow_user.reload[:suspended_till]).to be_within_one_second_of(1.day.from_now)
+      expect(shadow_user[:suspended_at]).to be_within_one_second_of(Time.zone.now)
+      expect(shadow_user.user_auth_tokens).to be_empty
+      expect(shadow_user.anonymous_user_master.reload.active).to eq(false)
+      expect(messages.size).to eq(1)
+      expect(messages[0].user_ids).to eq([shadow_user.id])
+      expect(messages[0].data).to eq(shadow_user.id)
+    end
+  end
+
   describe "delete posts in batches" do
     fab!(:post1, :post)
     fab!(:user) { post1.user }
@@ -810,8 +863,9 @@ RSpec.describe User do
           user.update!(name: "Sam")
           expect(post.reload.baked_version).not_to be_nil
 
-          user.update!(uploaded_avatar_id: 100)
-          expect(post.reload.baked_version).to be_nil
+          expect_enqueued_with(job: :rebake_quoted_posts_for_user, args: { user_id: user.id }) do
+            user.update!(uploaded_avatar_id: 100)
+          end
         end
       end
     end
@@ -1730,16 +1784,33 @@ RSpec.describe User do
       )
     end
 
-    it "is true for a user who posted less than 24 hours ago but was created over 1 day ago" do
-      u = create_test_user(created_at: 28.hours.ago)
-      u.user_stat.update!(first_post_created_at: 1.hour.ago)
-      expect(u.new_user_posting_on_first_day?).to eq(true)
+    it "is true for a TL1 user created less than 24 hours ago" do
+      expect(create_test_user(trust_level: TrustLevel[1]).new_user_posting_on_first_day?).to eq(
+        true,
+      )
     end
 
-    it "is false if first post was more than 24 hours ago" do
-      u = create_test_user(created_at: 28.hours.ago)
-      u.user_stat.update!(first_post_created_at: 25.hours.ago)
+    it "is false if account was created more than 24 hours ago" do
+      u = create_test_user(created_at: 25.hours.ago)
       expect(u.new_user_posting_on_first_day?).to eq(false)
+    end
+  end
+
+  describe "#first_day_topics_limit" do
+    it "returns the TL1 limit for TL1 users" do
+      SiteSetting.max_topics_in_first_day = 3
+      SiteSetting.tl1_max_topics_in_first_day = 6
+
+      expect(Fabricate(:user, trust_level: TrustLevel[1]).first_day_topics_limit).to eq(6)
+    end
+  end
+
+  describe "#first_day_replies_limit" do
+    it "returns the TL1 limit for TL1 users" do
+      SiteSetting.max_replies_in_first_day = 10
+      SiteSetting.tl1_max_replies_in_first_day = 30
+
+      expect(Fabricate(:user, trust_level: TrustLevel[1]).first_day_replies_limit).to eq(30)
     end
   end
 
@@ -1992,6 +2063,27 @@ RSpec.describe User do
 
       expect_enqueued_with(job: :update_gravatar, args: { user_id: user.id }) do
         user.refresh_avatar
+      end
+    end
+
+    it "enqueues rebake job instead of blocking when avatar is updated" do
+      user = Fabricate(:user)
+      upload = Fabricate(:upload)
+
+      allow(Post).to receive(:rebake_all_quoted_posts)
+
+      expect_enqueued_with(job: :rebake_quoted_posts_for_user, args: { user_id: user.id }) do
+        user.update!(uploaded_avatar_id: upload.id)
+      end
+
+      expect(Post).not_to have_received(:rebake_all_quoted_posts)
+    end
+
+    it "does not enqueue rebake job when avatar is not changed" do
+      user = Fabricate(:user)
+
+      expect_not_enqueued_with(job: :rebake_quoted_posts_for_user) do
+        user.update!(name: "New Name")
       end
     end
   end
@@ -3554,6 +3646,19 @@ RSpec.describe User do
       expect(admin.whisperer?).to eq(false)
     end
 
+    context "when primary_group_id is set without matching group membership" do
+      fab!(:user)
+
+      before do
+        SiteSetting.whispers_allowed_groups = group.id.to_s
+        user.update_column(:primary_group_id, group.id)
+      end
+
+      it "does not grant whisper access" do
+        expect(user).not_to be_a_whisperer
+      end
+    end
+
     it "returns true for user belonging to whisperers groups" do
       whisperer = Fabricate(:user)
       user = Fabricate(:user)
@@ -4169,6 +4274,41 @@ RSpec.describe User do
           SiteSetting.humanized_name(:enable_upload_debug_mode),
         )
         expect(change_stat[:description]).to eq(SiteSetting.description(:enable_upload_debug_mode))
+      end
+    end
+  end
+
+  describe "acl permissions" do
+    fab!(:acl_user) { Fabricate(:user, refresh_auto_groups: true) }
+    fab!(:acl_group) { Fabricate(:group).tap { |group| group.add(acl_user) } }
+    fab!(:viewable_category, :category)
+    fab!(:editable_category, :category)
+    fab!(:view_acl) do
+      Fabricate(
+        :access_control_list_with_groups,
+        target: viewable_category,
+        permission: "view",
+        groups: [acl_group],
+      )
+    end
+    fab!(:edit_acl) do
+      Fabricate(
+        :access_control_list_with_groups,
+        target: editable_category,
+        permission: "edit",
+        groups: [acl_group],
+      )
+    end
+
+    before do
+      Category.stubs(:has_mandatory_acl?).returns(true)
+      Category.stubs(:acl_is_mandatory?).returns(true)
+    end
+
+    describe "#permission_acl" do
+      it "builds an Acl::User from the acls matching the user and memoizes it" do
+        expect(acl_user.permission_acl).to be_a(Acl::User)
+        expect(acl_user.permission_acl).to equal(acl_user.permission_acl)
       end
     end
   end

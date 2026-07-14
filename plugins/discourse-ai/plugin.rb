@@ -19,9 +19,9 @@ register_asset "stylesheets/common/ai-blinking-animation.scss"
 register_asset "stylesheets/common/ai-user-settings.scss"
 register_asset "stylesheets/common/ai-features.scss"
 
-register_asset "stylesheets/admin/ai-features-editor.scss"
+register_asset "stylesheets/admin/ai-features-editor.scss", :admin
 
-register_asset "stylesheets/modules/translation/common/admin-translations.scss"
+register_asset "stylesheets/modules/translation/admin/translations.scss", :admin
 
 register_asset "stylesheets/modules/ai-helper/common/ai-helper.scss"
 register_asset "stylesheets/modules/ai-helper/desktop/ai-helper-fk-modals.scss", :desktop
@@ -32,6 +32,7 @@ register_asset "stylesheets/modules/summarization/desktop/ai-summary.scss", :des
 
 register_asset "stylesheets/modules/summarization/common/ai-gists.scss"
 
+register_asset "stylesheets/modules/admin-dashboard/common/admin-dashboard-highlight.scss"
 register_asset "stylesheets/modules/ai-bot/common/bot-replies.scss"
 register_asset "stylesheets/modules/ai-bot/common/ai-agent.scss"
 register_asset "stylesheets/modules/ai-bot/common/ai-discobot-discoveries.scss"
@@ -57,6 +58,7 @@ register_asset "stylesheets/modules/llms/common/ai-credit-bar.scss"
 register_asset "stylesheets/modules/ai-bot/common/ai-tools.scss"
 
 register_asset "stylesheets/modules/ai-bot/common/ai-artifact.scss"
+register_asset "stylesheets/modules/ai-bot/common/ai-tool-approval.scss"
 
 module ::DiscourseAi
   PLUGIN_NAME = "discourse-ai"
@@ -101,9 +103,16 @@ after_initialize do
   require_relative "discourse_automation/llm_agent_triage"
   require_relative "discourse_automation/llm_tagger"
 
+  if respond_to?(:register_discourse_workflows_node)
+    register_discourse_workflows_node do
+      require_relative "discourse_workflows/nodes/ai_agent/v1"
+      DiscourseWorkflows::Nodes::AiAgent::V1
+    end
+  end
+
   add_admin_route("discourse_ai.title", "discourse-ai", { use_new_show_route: true })
 
-  register_seedfu_fixtures(Rails.root.join("plugins", "discourse-ai", "db", "fixtures", "agents"))
+  register_seedfu_fixtures(Rails.root.join("plugins/discourse-ai/db/fixtures/agents"))
 
   [
     DiscourseAi::Embeddings::EntryPoint.new,
@@ -123,11 +132,36 @@ after_initialize do
   register_reviewable_type ReviewableAiChatMessage
   register_reviewable_type ReviewableAiPost
   register_reviewable_type ReviewableAiToolAction
+  add_permitted_reviewable_param :reviewable_ai_tool_action, :post_id
 
   on(:reviewable_transitioned_to) do |new_status, reviewable|
     ModelAccuracy.adjust_model_accuracy(new_status, reviewable)
     if DiscourseAi::AiModeration::SpamScanner.enabled?
       DiscourseAi::AiModeration::SpamMetric.update(new_status, reviewable)
+    end
+  end
+
+  # when an account is removed, clear the user's own logs and the logs tied to
+  # the content being deleted with the account. the content callback runs before
+  # discourse reassigns/soft-deletes the user's posts, so ownership is still intact.
+  on(:user_destroyed) { |user| DiscourseAi::AiApiAuditLogCleaner.delete_for_user(user.id) }
+
+  register_user_destroyer_on_content_deletion_callback(
+    Proc.new { |user| DiscourseAi::AiApiAuditLogCleaner.delete_for_user_content(user) },
+  )
+
+  # outside account deletion, only purge logs once the content is permanently
+  # gone; a soft-deleted (trashed) post or topic is still recoverable, so its
+  # audit log must remain
+  on(:post_destroyed) do |post|
+    if !Post.with_deleted.exists?(post.id)
+      DiscourseAi::AiApiAuditLogCleaner.delete_for_post(post.id)
+    end
+  end
+
+  on(:topic_destroyed) do |topic|
+    if !Topic.with_deleted.exists?(topic.id)
+      DiscourseAi::AiApiAuditLogCleaner.delete_for_topic(topic.id)
     end
   end
 

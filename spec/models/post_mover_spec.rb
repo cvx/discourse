@@ -3354,65 +3354,57 @@ RSpec.describe PostMover do
         end
 
         it "does not rate limit when moving to a new topic" do
-          begin
-            PostMover.new(
-              original_topic,
-              Discourse.system_user,
-              original_topic.posts.map(&:id),
-              options: {
-                freeze_original: true,
-              },
-            ).to_new_topic("Hi I'm a new topic, with a copy of the old posts")
-          rescue RateLimiter::LimitExceeded
-            fail "Rate limit exceeded"
-          end
+          PostMover.new(
+            original_topic,
+            Discourse.system_user,
+            original_topic.posts.map(&:id),
+            options: {
+              freeze_original: true,
+            },
+          ).to_new_topic("Hi I'm a new topic, with a copy of the old posts")
+        rescue RateLimiter::LimitExceeded
+          fail "Rate limit exceeded"
         end
 
         it "does not rate limit when moving to an existing topic" do
-          begin
-            PostMover.new(
-              original_topic,
-              Discourse.system_user,
-              original_topic.posts.map(&:id),
-              options: {
-                freeze_original: true,
-              },
-            ).to_topic(destination_topic.id)
-          rescue RateLimiter::LimitExceeded
-            fail "Rate limit exceeded"
-          end
+          PostMover.new(
+            original_topic,
+            Discourse.system_user,
+            original_topic.posts.map(&:id),
+            options: {
+              freeze_original: true,
+            },
+          ).to_topic(destination_topic.id)
+        rescue RateLimiter::LimitExceeded
+          fail "Rate limit exceeded"
         end
 
         it "does not rate limit when moving to a new PM" do
-          begin
-            PostMover.new(
-              original_topic,
-              Discourse.system_user,
-              original_topic.posts.map(&:id),
-              move_to_pm: true,
-              options: {
-                freeze_original: true,
-              },
-            ).to_new_topic("Hi I'm a new PM, with a copy of the old posts")
-          rescue RateLimiter::LimitExceeded
-            fail "Rate limit exceeded"
-          end
+          PostMover.new(
+            original_topic,
+            Discourse.system_user,
+            original_topic.posts.map(&:id),
+            move_to_pm: true,
+            options: {
+              freeze_original: true,
+            },
+          ).to_new_topic("Hi I'm a new PM, with a copy of the old posts")
+        rescue RateLimiter::LimitExceeded
+          fail "Rate limit exceeded"
         end
 
         it "does not rate limit when moving to an existing PM" do
-          begin
-            PostMover.new(
-              original_topic,
-              Discourse.system_user,
-              original_topic.posts.map(&:id),
-              move_to_pm: true,
-              options: {
-                freeze_original: true,
-              },
-            ).to_topic(destination_topic.id)
-          rescue RateLimiter::LimitExceeded
-            fail "Rate limit exceeded"
-          end
+          PostMover.new(
+            original_topic,
+            Discourse.system_user,
+            original_topic.posts.map(&:id),
+            move_to_pm: true,
+            options: {
+              freeze_original: true,
+            },
+          ).to_topic(destination_topic.id)
+        rescue RateLimiter::LimitExceeded
+          fail "Rate limit exceeded"
         end
       end
     end
@@ -3453,6 +3445,60 @@ RSpec.describe PostMover do
             &modifier_block
           )
         end
+      end
+    end
+
+    context "with reviewables" do
+      fab!(:original_category, :category)
+      fab!(:original_topic) { Fabricate(:topic, category: original_category) }
+      fab!(:target_post) { Fabricate(:post, topic: original_topic) }
+
+      fab!(:private_category) { Fabricate(:private_category, group: Fabricate(:group)) }
+      fab!(:private_topic) { Fabricate(:topic, category: private_category) }
+
+      fab!(:reviewable) do
+        Fabricate(
+          :reviewable_flagged_post,
+          target: target_post,
+          target_created_by: target_post.user,
+          topic: original_topic,
+          category: original_category,
+        )
+      end
+
+      it "updates reviewable category_id and topic_id when moving posts to another topic" do
+        expect(reviewable.category_id).to eq(original_category.id)
+        expect(reviewable.topic_id).to eq(original_topic.id)
+
+        PostMover.new(original_topic, admin, [target_post.id]).to_topic(private_topic.id)
+
+        reviewable.reload
+        expect(reviewable.category_id).to eq(private_category.id)
+        expect(reviewable.topic_id).to eq(private_topic.id)
+      end
+
+      it "updates multiple reviewables when moving multiple flagged posts" do
+        target_post_2 = Fabricate(:post, topic: original_topic)
+        reviewable_2 =
+          Fabricate(
+            :reviewable_flagged_post,
+            target: target_post_2,
+            target_created_by: target_post_2.user,
+            topic: original_topic,
+            category: original_category,
+          )
+
+        PostMover.new(original_topic, admin, [target_post.id, target_post_2.id]).to_topic(
+          private_topic.id,
+        )
+
+        reviewable.reload
+        reviewable_2.reload
+
+        expect(reviewable.category_id).to eq(private_category.id)
+        expect(reviewable.topic_id).to eq(private_topic.id)
+        expect(reviewable_2.category_id).to eq(private_category.id)
+        expect(reviewable_2.topic_id).to eq(private_topic.id)
       end
     end
 

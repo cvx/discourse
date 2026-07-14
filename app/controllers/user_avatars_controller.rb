@@ -53,14 +53,12 @@ class UserAvatarsController < ApplicationController
     return render_blank if disable_proxy?
 
     hijack do
-      begin
-        proxy_avatar(
-          "https://avatars.discourse-cdn.com/#{params[:version]}/letter/#{params[:letter]}/#{params[:color]}/#{params[:size]}.png",
-          Time.new(1990, 01, 01),
-        )
-      rescue OpenURI::HTTPError
-        render_blank
-      end
+      proxy_avatar(
+        "https://avatars.discourse-cdn.com/#{params[:version]}/letter/#{params[:letter]}/#{params[:color]}/#{params[:size]}.png",
+        Time.new(1990, 01, 01),
+      )
+    rescue OpenURI::HTTPError
+      render_blank
     end
   end
 
@@ -152,7 +150,13 @@ class UserAvatarsController < ApplicationController
       response.headers["Last-Modified"] = File.ctime(image).httpdate
       response.headers["Content-Length"] = File.size(image).to_s
       immutable_for 1.year
-      send_file image, disposition: nil
+
+      if optimized.is_a?(Upload) && !FileHelper.is_inline_safe?(optimized.original_filename)
+        response.headers["Content-Security-Policy"] = "sandbox;"
+        send_file image, disposition: "attachment"
+      else
+        send_file image, disposition: nil
+      end
     else
       render_blank
     end
@@ -200,7 +204,13 @@ class UserAvatarsController < ApplicationController
     response.headers["Last-Modified"] = last_modified.httpdate
     response.headers["Content-Length"] = File.size(path).to_s
     immutable_for(1.year)
-    send_file path, disposition: nil
+
+    if !FileHelper.is_inline_safe?(filename)
+      response.headers["Content-Security-Policy"] = "sandbox;"
+      send_file path, disposition: "attachment"
+    else
+      send_file path, disposition: nil
+    end
   rescue Errno::ENOENT, ActionController::MissingFile
     render_blank
   end

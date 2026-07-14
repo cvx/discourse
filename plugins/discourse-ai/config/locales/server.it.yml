@@ -43,7 +43,6 @@ it:
     ai_sentiment_enabled: "Abilita il modulo sentimento."
     ai_sentiment_inference_service_api_endpoint: "URL in cui l'API è in esecuzione per il modulo sentimento"
     ai_sentiment_inference_service_api_key: "Chiave API per l'API di sentimento"
-    ai_sentiment_models: "Modelli da utilizzare per l'inferenza. Il sentimento classifica i messaggi nello spazio positivo/neutro/negativo. L'emozione si classifica nello spazio rabbia/disgusto/paura/gioia/neutrale/tristezza/sorpresa."
     ai_nsfw_detection_enabled: "Abilita il modulo NSFW."
     ai_nsfw_inference_service_api_endpoint: "URL in cui l'API è in esecuzione per il modulo NSFW"
     ai_nsfw_inference_service_api_key: "Chiave API per l'API NSFW"
@@ -402,6 +401,8 @@ it:
         random_picker: "Selettore casuale"
         categories: "Elenca le categorie"
         flag_post: "Segnala messaggio"
+        suspend_user: "Sospendi utente"
+        silence_user: "Silenzia utente"
         search: "Cerca"
         tags: "Elenca le etichette"
         time: "Ora"
@@ -582,7 +583,6 @@ it:
       removed: "rimosso"
     errors:
       quota_exceeded: "Hai superato la quota per questo modello. Riprova tra %{relative_time}."
-      quota_required: "È necessario specificare il numero massimo di token o utilizzi per questo modello"
       no_query_specified: Il parametro di query è obbligatorio, specificalo.
       no_user_specified: Il parametro username o user_unique_id è obbligatorio, specificalo.
       user_not_found: L'utente specificato non esiste. Controlla il parametro username.

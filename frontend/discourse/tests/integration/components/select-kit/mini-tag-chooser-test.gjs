@@ -1,14 +1,13 @@
 import { hash } from "@ember/helper";
-import { click, render, triggerKeyEvent } from "@ember/test-helpers";
+import { click, findAll, render, triggerKeyEvent } from "@ember/test-helpers";
 import { module, test } from "qunit";
 import MiniTagChooser from "discourse/select-kit/components/mini-tag-chooser";
 import { setupRenderingTest } from "discourse/tests/helpers/component-test";
-import { queryAll } from "discourse/tests/helpers/qunit-helpers";
 import selectKit from "discourse/tests/helpers/select-kit-helper";
 import { i18n } from "discourse-i18n";
 
 module(
-  "Integration | Component | select-kit/mini-tag-chooser",
+  "Integration | Component | SelectKit | MiniTagChooser",
   function (hooks) {
     setupRenderingTest(hooks);
 
@@ -44,17 +43,48 @@ module(
       await this.subject.expand();
       await this.subject.fillInFilter("mon");
       assert.deepEqual(
-        [...queryAll(".select-kit-row")].map((el) => el.textContent.trim()),
+        findAll(".select-kit-row").map((el) => el.textContent.trim()),
         ["monkey x1", "gazelle x2", "dog x3", "cat x4"]
       );
       await this.subject.fillInFilter("key");
       assert.deepEqual(
-        [...queryAll(".select-kit-row")].map((el) => el.textContent.trim()),
+        findAll(".select-kit-row").map((el) => el.textContent.trim()),
         ["monkey x1", "gazelle x2", "dog x3", "cat x4"]
       );
       await this.subject.selectRowByName("monkey");
 
       assert.strictEqual(this.subject.header().name(), "foo,bar,monkey");
+    });
+
+    test("navigating results with arrow keys after filtering", async function (assert) {
+      await render(
+        <template><MiniTagChooser @options={{hash allowAny=true}} /></template>
+      );
+
+      await this.subject.expand();
+      await this.subject.fillInFilter("mon");
+
+      assert.strictEqual(
+        this.subject.highlightedRow().name(),
+        "mon",
+        "the create-tag row is highlighted after filtering"
+      );
+
+      await this.subject.keyboard("down");
+
+      assert.strictEqual(
+        this.subject.highlightedRow().name(),
+        "monkey",
+        "a single down arrow press highlights the next row"
+      );
+
+      await this.subject.keyboard("up");
+
+      assert.strictEqual(
+        this.subject.highlightedRow().name(),
+        "mon",
+        "a single up arrow press highlights the previous row"
+      );
     });
 
     test("max_tags_per_topic", async function (assert) {
@@ -192,7 +222,7 @@ module(
 
       await this.subject.expand();
       assert.deepEqual(
-        [...queryAll(".selected-content .selected-choice")].map((el) =>
+        findAll(".selected-content .selected-choice").map((el) =>
           el.textContent.trim()
         ),
         ["bar"]

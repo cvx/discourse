@@ -152,44 +152,52 @@ export default class AdminReports extends Component {
     return groupedReports;
   }
 
+  @bind
+  groupDropdownOptions(reports) {
+    const groups = this.groupReports(this.filterReports(reports));
+
+    return [
+      {
+        value: "all",
+        label: i18n("admin.reports.all_groups"),
+        filterFn: () => true,
+      },
+      ...groups.map((group) => ({
+        value: group.key,
+        label: group.name,
+        filterFn: (report) => group.reports.includes(report),
+      })),
+    ];
+  }
+
   <template>
     <DAsyncContent @asyncData={{this.loadReports}}>
       <:content as |reports|>
         <AdminFilterControls
           @array={{this.filterReports reports}}
           @searchableProps={{array "title" "description"}}
+          @dropdownOptions={{this.groupDropdownOptions reports}}
+          @textFilterQueryParam="filter"
+          @dropdownFilterQueryParam="group"
           @inputPlaceholder={{i18n "admin.filter_reports"}}
           @noResultsMessage={{i18n "admin.filter_reports_no_results"}}
         >
           <:content as |filteredReports|>
-            {{#if this.siteSettings.reporting_improvements}}
-              {{#each (this.groupReports filteredReports) as |group|}}
-                <section class="admin-reports-group">
-                  <h2 class="admin-reports-group__title">{{group.name}}</h2>
-                  <AdminSectionLandingWrapper class="admin-reports-list">
-                    {{#each group.reports as |report|}}
-                      <AdminSectionLandingItem
-                        @titleLabelTranslated={{report.title}}
-                        @descriptionLabelTranslated={{report.description}}
-                        @titleRoute="adminReports.show"
-                        @titleRouteModel={{report.type}}
-                      />
-                    {{/each}}
-                  </AdminSectionLandingWrapper>
-                </section>
-              {{/each}}
-            {{else}}
-              <AdminSectionLandingWrapper class="admin-reports-list">
-                {{#each filteredReports as |report|}}
-                  <AdminSectionLandingItem
-                    @titleLabelTranslated={{report.title}}
-                    @descriptionLabelTranslated={{report.description}}
-                    @titleRoute="adminReports.show"
-                    @titleRouteModel={{report.type}}
-                  />
-                {{/each}}
-              </AdminSectionLandingWrapper>
-            {{/if}}
+            {{#each (this.groupReports filteredReports) as |group|}}
+              <section class="admin-reports-group">
+                <h2 class="admin-reports-group__title">{{group.name}}</h2>
+                <AdminSectionLandingWrapper class="admin-reports-list">
+                  {{#each group.reports as |report|}}
+                    <AdminSectionLandingItem
+                      @titleLabelTranslated={{report.title}}
+                      @descriptionLabelTranslated={{report.description}}
+                      @titleRoute="adminReports.show"
+                      @titleRouteModel={{report.type}}
+                    />
+                  {{/each}}
+                </AdminSectionLandingWrapper>
+              </section>
+            {{/each}}
           </:content>
         </AdminFilterControls>
       </:content>

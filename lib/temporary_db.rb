@@ -10,12 +10,13 @@ class TemporaryDb
   STARTUP_TIMEOUT_SECONDS = 60
   DEFAULT_PG_SYSTEM_USER = "postgres"
 
-  def initialize(pg_system_user: DEFAULT_PG_SYSTEM_USER, versions: VERSIONS)
+  def initialize(pg_system_user: DEFAULT_PG_SYSTEM_USER, versions: VERSIONS, port: nil)
     @pg_temp_path = File.join(Dir.tmpdir, "#{PG_TEMP_PREFIX}_#{SecureRandom.hex(6)}")
     @pg_conf = "#{@pg_temp_path}/postgresql.conf"
     @pg_sock_path = "#{@pg_temp_path}/sockets"
     @pg_system_user = pg_system_user
     @versions = versions
+    @pg_port = port
   end
 
   def port_available?(port)
@@ -43,6 +44,24 @@ class TemporaryDb
     # macOS Postgres.app: /Applications/Postgres.app/Contents/Versions/{version}/bin
     @versions.reverse_each do |v|
       bin_path = "/Applications/Postgres.app/Contents/Versions/#{v}/bin"
+      return @pg_bin_path = bin_path if File.exist?("#{bin_path}/pg_ctl")
+    end
+
+    # macOS MacPorts: /opt/local/lib/postgresql{version}/bin
+    @versions.reverse_each do |v|
+      bin_path = "/opt/local/lib/postgresql#{v}/bin"
+      return @pg_bin_path = bin_path if File.exist?("#{bin_path}/pg_ctl")
+    end
+
+    # macOS homebrew: /opt/homebrew/opt/postgresql@{version}/bin
+    @versions.reverse_each do |v|
+      bin_path = "/opt/homebrew/opt/postgresql@#{v}/bin"
+      return @pg_bin_path = bin_path if File.exist?("#{bin_path}/pg_ctl")
+    end
+
+    # Arch AUR packages: /opt/postgresql{version}/bin
+    @versions.reverse_each do |v|
+      bin_path = "/opt/postgresql#{v}/bin"
       return @pg_bin_path = bin_path if File.exist?("#{bin_path}/pg_ctl")
     end
 
@@ -78,7 +97,7 @@ class TemporaryDb
 
   def start
     init_data_directory
-    configure_ports
+    configure_database
 
     puts "Starting postgres on port: #{pg_port}"
     @previous_discourse_pg_port = ENV["DISCOURSE_PG_PORT"]
@@ -87,7 +106,6 @@ class TemporaryDb
     start_server
     @started = true
 
-    create_user
     create_database
 
     puts "PG server is ready and DB is loaded"
@@ -170,15 +188,26 @@ class TemporaryDb
       "--locale=en_US.UTF-8",
       "-E",
       "UTF8",
+      "--username=discourse",
       error_prefix: "Failed to initialize postgres data directory",
     )
   end
 
-  def configure_ports
+  def configure_database
     FileUtils.mkdir(@pg_sock_path)
     FileUtils.chown(@pg_system_user, nil, @pg_sock_path) if running_as_root?
     conf = File.read(@pg_conf)
-    File.write(@pg_conf, conf + "\nport = #{pg_port}\nunix_socket_directories = '#{@pg_sock_path}'")
+    conf << <<~CONF
+
+      port = #{pg_port}
+      unix_socket_directories = '#{@pg_sock_path}'
+      fsync = off
+      synchronous_commit = off
+      full_page_writes = off
+      wal_level = minimal
+      max_wal_senders = 0
+    CONF
+    File.write(@pg_conf, conf)
   end
 
   def start_server
@@ -197,21 +226,6 @@ class TemporaryDb
     )
   end
 
-  def create_user
-    run_command!(
-      "createuser",
-      "-h",
-      "localhost",
-      "-p",
-      pg_port.to_s,
-      "-s",
-      "-D",
-      "-w",
-      "discourse",
-      error_prefix: "Failed to create temporary postgres superuser",
-    )
-  end
-
   def create_database
     run_command!(
       "createdb",
@@ -219,6 +233,8 @@ class TemporaryDb
       "localhost",
       "-p",
       pg_port.to_s,
+      "-U",
+      "discourse",
       "discourse",
       error_prefix: "Failed to create temporary postgres database",
     )

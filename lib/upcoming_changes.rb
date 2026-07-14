@@ -7,24 +7,58 @@ module UpcomingChanges
   # might modify how site behavior works if another setting is enabled,
   # and so on.
   #
-  # You can define any should_display_<upcoming_change_name>? method to control
-  # whether an upcoming change should be displayed to admins, and if the
-  # method is undefined the change will always be displayed.
+  # Core can define any should_display_<upcoming_change_name>? method to control
+  # whether an upcoming change should be displayed to admins. Plugins can use
+  # Plugin::Instance#register_upcoming_change_conditional_display for their own
+  # upcoming changes. If no conditional display rule is defined, the change will
+  # always be displayed.
   #
   # Keep in mind this is called from UpcomingChanges::List service,
   # which loops over every change in an N1 depending on the filters admins
   # have selected, so caching may be appropriate at times.
   class ConditionalDisplay
     def self.should_display?(upcoming_change_name)
+      upcoming_change_name = upcoming_change_name.to_sym
+
+      return false if !UpcomingChanges.owning_plugin_configurable?(upcoming_change_name)
+
       if respond_to?("should_display_#{upcoming_change_name}?")
         return public_send("should_display_#{upcoming_change_name}?")
       end
 
-      true
+      callbacks =
+        DiscoursePluginRegistry.upcoming_change_conditional_display_callbacks.select do |callback|
+          callback[:setting_name] == upcoming_change_name
+        end
+
+      callbacks.empty? || callbacks.all? { |callback| callback[:callback].call }
     end
 
     def self.should_display_enable_horizon_high_context_topic_cards?
       Themes::Action::HorizonHighContextTopicCardsToggled.should_display_upcoming_change?
+    end
+
+    # Sites already running the discourse-gifs theme component will have their
+    # configuration migrated separately so they don't need to opt in via the upcoming change.
+    def self.should_display_enable_gifs?
+      !DiscourseGifs.component_installed?
+    end
+
+    # Only relevant on sites that currently allow uncategorized topics, and must
+    # stay visible after being enabled (which disables that setting).
+    def self.should_display_remove_and_replace_uncategorized?
+      SiteSetting::Action::RemoveAndReplaceUncategorizedToggled.should_display_upcoming_change?
+    end
+
+    # Code login is a delivery variant of email login (see
+    # EnableLocalLoginsViaCodeValidator), so the change is only actionable when
+    # local logins via email are possible. Must stay visible once enabled so
+    # admins can still find and disable it.
+    def self.should_display_enable_local_logins_via_code?
+      return true if UpcomingChanges.enabled?(:enable_local_logins_via_code)
+
+      SiteSetting.enable_local_logins && SiteSetting.enable_local_logins_via_email &&
+        !SiteSetting.enable_discourse_connect
     end
   end
 
@@ -59,17 +93,26 @@ module UpcomingChanges
   end
 
   def self.previous_status_value(status)
-    status_value = self.statuses[status.to_sym]
-    self.statuses.values.select { |value| value < status_value }.max || -100
+    status_value = statuses[status.to_sym]
+    statuses.values.select { |value| value < status_value }.max || -100
   end
 
   def self.previous_status(status)
-    self.statuses.keys.select { |key| self.statuses[key] < self.statuses[status.to_sym] }.last ||
-      :conceptual
+    statuses.keys.select { |key| statuses[key] < statuses[status.to_sym] }.last || :conceptual
+  end
+
+  def self.next_status(status)
+    status = status&.to_sym
+    status_value = statuses[status]
+
+    return if status_value.nil?
+    return if status_value < statuses[:experimental] || status_value >= statuses[:stable]
+
+    statuses.keys.find { |key| statuses[key] > status_value }
   end
 
   def self.image_exists?(change_setting_name)
-    File.exist?(File.join(Rails.public_path, self.image_path(change_setting_name)))
+    File.exist?(File.join(Rails.public_path, image_path(change_setting_name)))
   end
 
   def self.image_path(change_setting_name)
@@ -135,6 +178,22 @@ module UpcomingChanges
     change_metadata(change_setting_name.to_sym).present?
   end
 
+  # An upcoming change owned by a plugin that is not configurable on this site,
+  # is never available. It must not be displayed, notified about, or enabled.
+  #
+  # This is deliberately broader than the guard in SiteSettingExtension#setting,
+  # which only forces a plugin's own enabled_site_setting to false. A change
+  # gating a sub-feature of an unavailable plugin is equally unavailable.
+  #
+  # Core changes have no owning plugin and return early, so the common case
+  # never reaches #configurable? and adds no cost to callers on hot paths like
+  # .settings_hidden_while_enabled.
+  def self.owning_plugin_configurable?(change_setting_name)
+    plugin_name = settings_provider.plugins[change_setting_name.to_sym]
+    return true if plugin_name.nil?
+    Discourse.plugins_by_name[plugin_name]&.configurable? != false
+  end
+
   # We dynamically determine if an upcoming change is enabled
   # or disabled based on the current status of the change as well
   # as whether the admin has manually toggled the change.
@@ -147,6 +206,11 @@ module UpcomingChanges
     if !exists?(change_setting_name)
       raise ArgumentError, "Unknown upcoming change: #{change_setting_name}"
     end
+
+    # The owning plugin is not available on this site, so neither is the change.
+    # This intentionally takes precedence over the :permanent status below, since
+    # a permanent change to an unavailable plugin still cannot take effect.
+    return false if !owning_plugin_configurable?(change_setting_name)
 
     # An admin has modified the setting and a value is stored
     # in the database, since the default for upcoming changes
@@ -368,7 +432,7 @@ module UpcomingChanges
   # to save time in other places in the codebase when we have to figure out
   # when an upcoming change moved to its current status.
   #
-  # This cache is automatically cleared when UpcomingChanges::Action::TrackNotifyStatusChanges
+  # This cache is automatically cleared when UpcomingChanges::Action::TrackStatusChanges
   # is called, since that adds new UpcomingChangeEvent records.
   def self.current_statuses
     Discourse
@@ -425,6 +489,13 @@ module UpcomingChanges
       end
   end
 
+  # The setting names of all permanent upcoming changes. Used on the frontend
+  # to decide whether a notification should link to the upcoming changes page
+  # or to the What's New page (where permanent changes are surfaced).
+  def self.permanent_upcoming_change_names
+    permanent_upcoming_changes.map { |uc| uc[:setting].to_s }
+  end
+
   # No point in notifying admins on brand new sites, the upcoming change system
   # is more about notifying admins of changes to established sites.
   #
@@ -441,5 +512,53 @@ module UpcomingChanges
   # This is done via depends_on and depends_behavior: hidden in site_settings.yml.
   def self.find_dependents_for_change(change_setting_name)
     settings_provider.type_supervisor.dependencies.dependents(change_setting_name.to_s)
+  end
+
+  # Whether the settings the change itself depends_on (in site_settings.yml)
+  # currently hold the values the change needs. Used by the admin UI to warn
+  # admins when a change's prerequisites are not met, since enabling the change
+  # would have no effect (or be rejected by a validator) until they are.
+  def self.change_dependencies_met?(change_setting_name)
+    dependencies = settings_provider.type_supervisor.dependencies[change_setting_name.to_sym]
+    return true if dependencies.blank?
+
+    allowed_values = settings_provider.dependency_values[change_setting_name.to_sym]
+    dependencies.all? do |dependency|
+      value = settings_provider.public_send(dependency)
+      if (allowed = allowed_values&.dig(dependency))
+        allowed.include?(value.to_s)
+      else
+        value == true
+      end
+    end
+  end
+
+  def self.including_css
+    settings_provider.upcoming_change_site_settings.filter_map do |upcoming_change|
+      upcoming_change if settings_provider.upcoming_change_metadata[upcoming_change][:body_class]
+    end
+  end
+
+  # Site settings to hide from admins because an upcoming change that declares
+  # `hide_settings:` (in its site_settings.yml metadata) is currently enabled.
+  # Legacy settings a change replaces stop making sense once the change is in
+  # effect, so they are hidden while it is enabled.
+  #
+  # Consulted by SiteSettings::HiddenProvider#all, which runs on every
+  # hidden_settings read. It is computed live rather than toggled at opt-in time
+  # so it tracks both opt-in paths (manual and auto-promotion) and is
+  # multisite-safe: the hidden set is process-global, but enabled? resolves
+  # per-site, so we never hide a setting for sites that haven't opted in.
+  #
+  # `enabled?` is only called for the (usually zero) changes that declare
+  # `hide_settings`, so the common case is a cheap metadata scan with no DB hit.
+  def self.settings_hidden_while_enabled
+    metadata = settings_provider.upcoming_change_metadata
+    return [] if metadata.empty?
+
+    metadata.each_with_object([]) do |(change_name, change_metadata), hidden|
+      next if change_metadata[:hide_settings].blank?
+      hidden.concat(change_metadata[:hide_settings]) if enabled?(change_name)
+    end
   end
 end

@@ -102,15 +102,10 @@ export default class DiscourseReactionsListEmoji extends Component {
 
   <template>
     {{#if this.useNewMenu}}
-      <div
-        class="discourse-reactions-list-emoji"
-        id={{this.elementId}}
-        data-reaction-id={{@reaction.id}}
-      >
+      <div class="discourse-reactions-list-emoji" id={{this.elementId}}>
         {{#if @reaction.count}}
           {{dEmoji
             @reaction.id
-            skipTitle=true
             class=(if
               this.siteSettings.discourse_reactions_desaturated_reaction_panel
               "desaturated"

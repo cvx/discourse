@@ -69,6 +69,10 @@ export default class MiniTagChooser extends MultiSelectComponent {
   }
 
   modifyComponentForRow(collection, item) {
+    if (typeof item?.onSelect === "function") {
+      return SelectKitRow;
+    }
+
     if (this.getValue(item) === this.selectKit.filter && !item.count) {
       return SelectKitRow;
     }
@@ -169,7 +173,6 @@ export default class MiniTagChooser extends MultiSelectComponent {
 
     if (!this.selectKit.options.everyTag) {
       data.filterForInput = true;
-      data.excludeSynonyms = true;
     }
 
     return this.tagUtils.searchTags(
@@ -185,16 +188,12 @@ export default class MiniTagChooser extends MultiSelectComponent {
       return [];
     }
 
-    let results = json.results;
-
     this.setProperties({
       termMatchesForbidden: json.forbidden ? true : false,
       termMatchErrorMessage: json.forbidden_message,
     });
 
-    if (this.siteSettings.tags_sort_alphabetically) {
-      results = results.sort((a, b) => a.name.localeCompare(b.name));
-    }
+    let results = this.tagUtils.sortSearchResults(json.results);
 
     if (json.required_tag_group) {
       this.set(

@@ -117,6 +117,14 @@ export default class History extends Component {
     return this.postRevision?.body_changes?.[this.viewMode];
   }
 
+  get diffHidden() {
+    return (
+      !this.postRevision?.body_changes &&
+      !this.postRevision?.diff_error &&
+      (this.postRevision?.previous_hidden || this.postRevision?.current_hidden)
+    );
+  }
+
   @action
   async calculateBodyDiff(_, [bodyDiff]) {
     let html = bodyDiff;
@@ -261,6 +269,10 @@ export default class History extends Component {
   }
 
   get hiddenClasses() {
+    if (this.diffHidden) {
+      return null;
+    }
+
     if (this.viewMode === "inline") {
       return this.postRevision?.previous_hidden ||
         this.postRevision?.current_hidden
@@ -387,7 +399,8 @@ export default class History extends Component {
     <DModal
       @title={{i18n this.modalTitleKey}}
       @closeModal={{@closeModal}}
-      class="history-modal -max {{concat '--mode-' (dDasherize this.viewMode)}}"
+      class="history-modal --max
+        {{concat '--mode-' (dDasherize this.viewMode)}}"
     >
       <:body>
         {{#if this.error}}
@@ -407,6 +420,7 @@ export default class History extends Component {
             <Revisions
               @model={{this.postRevision}}
               @hiddenClasses={{this.hiddenClasses}}
+              @diffHidden={{this.diffHidden}}
               @mobileView={{this.site.mobileView}}
               @userChanges={{this.user_changes}}
               @previousCategory={{this.previousCategory}}

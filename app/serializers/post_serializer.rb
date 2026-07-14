@@ -15,7 +15,7 @@ class PostSerializer < BasicPostSerializer
     ignored_user_like_counts
   ]
 
-  INSTANCE_VARS.each { |v| self.public_send(:attr_accessor, v) }
+  INSTANCE_VARS.each { |v| public_send(:attr_accessor, v) }
 
   attributes :post_number,
              :post_type,
@@ -101,13 +101,14 @@ class PostSerializer < BasicPostSerializer
              :locale,
              :is_localized,
              :language,
-             :localization_outdated
+             :localization_outdated,
+             :localized_oneboxes
 
   def initialize(object, opts)
     super(object, opts)
 
     PostSerializer::INSTANCE_VARS.each do |name|
-      self.public_send("#{name}=", opts[name]) if opts.include? name
+      public_send("#{name}=", opts[name]) if opts.include? name
     end
   end
 
@@ -160,15 +161,15 @@ class PostSerializer < BasicPostSerializer
   end
 
   def moderator?
-    !!(object&.user&.moderator?)
+    !!object&.user&.moderator?
   end
 
   def admin?
-    !!(object&.user&.admin?)
+    !!object&.user&.admin?
   end
 
   def staff?
-    !!(object&.user&.staff?)
+    !!object&.user&.staff?
   end
 
   def group_moderator
@@ -177,12 +178,10 @@ class PostSerializer < BasicPostSerializer
 
   def include_group_moderator?
     @group_moderator ||=
-      begin
-        if @topic_view
-          @topic_view.category_group_moderator_user_ids.include?(object.user_id)
-        else
-          object&.user&.guardian&.is_category_group_moderator?(object&.topic&.category)
-        end
+      if @topic_view
+        @topic_view.category_group_moderator_user_ids.include?(object.user_id)
+      else
+        object&.user&.guardian&.is_category_group_moderator?(object&.topic&.category)
       end
   end
 
@@ -279,6 +278,16 @@ class PostSerializer < BasicPostSerializer
     end
   end
 
+  def localized_oneboxes
+    @topic_view.localized_oneboxes[object.id]
+  end
+
+  def include_localized_oneboxes?
+    SiteSetting.content_localization_enabled && @topic_view.present? &&
+      !ContentLocalization.show_original?(scope) &&
+      @topic_view.localized_oneboxes[object.id].present?
+  end
+
   def read
     @topic_view.read?(object.post_number)
   end
@@ -304,12 +313,7 @@ class PostSerializer < BasicPostSerializer
   end
 
   def reply_to_user
-    {
-      id: object.reply_to_user.id,
-      username: object.reply_to_user.username,
-      name: object.reply_to_user.name,
-      avatar_template: object.reply_to_user.avatar_template,
-    }
+    BasicUserSerializer.new(object.reply_to_user, root: false).as_json
   end
 
   def deleted_by
@@ -339,7 +343,7 @@ class PostSerializer < BasicPostSerializer
     ignored_like_count = ignored_like_count_for_viewer
 
     @post_action_type_view.types.each do |sym, id|
-      count_col = "#{sym}_count".to_sym
+      count_col = :"#{sym}_count"
 
       count = object.public_send(count_col) if object.respond_to?(count_col)
       count = [count.to_i - ignored_like_count, 0].max if count && sym == :like
@@ -421,6 +425,7 @@ class PostSerializer < BasicPostSerializer
   end
 
   def include_link_counts?
+    return false if object.hidden? && !scope.can_see_hidden_post?(object)
     return true if @single_post_link_counts.present?
 
     @topic_view.present? && @topic_view.link_counts.present? &&
@@ -741,7 +746,7 @@ class PostSerializer < BasicPostSerializer
   end
 
   def user_custom_fields_object
-    (@topic_view&.user_custom_fields || @options[:user_custom_fields] || {})
+    @topic_view&.user_custom_fields || @options[:user_custom_fields] || {}
   end
 
   def topic

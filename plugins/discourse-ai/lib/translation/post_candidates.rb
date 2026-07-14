@@ -8,8 +8,7 @@ module DiscourseAi
       # Also returns aggregate counts for total eligible posts and posts with detected locale.
       # @return [Hash] a hash with keys :translation_progress (array), :total (integer), and :posts_with_detected_locale (integer)
       def self.get_completion_all_locales
-        cache_key = "ai-translations-progress-#{SiteSetting.content_localization_supported_locales}"
-        Discourse.cache.fetch(cache_key, expires_in: 30.minutes) { completion_all_locales }
+        Discourse.cache.fetch(progress_cache_key, expires_in: 30.minutes) { completion_all_locales }
       end
 
       def self.needs_localization(limit:)
@@ -60,21 +59,15 @@ module DiscourseAi
 
         posts = posts.joins(:topic)
 
-        target_category_ids = SiteSetting.ai_translation_target_categories
         pm_scope = SiteSetting.ai_translation_personal_messages
+        category_condition, category_params =
+          DiscourseAi::Translation.category_scope_condition(category_column: "topics.category_id")
 
-        # Category filter: include target categories + PMs (PMs filtered in next step)
-        if target_category_ids.present?
-          category_ids = target_category_ids.split("|").map(&:to_i)
-          posts =
-            posts.where(
-              "topics.category_id IN (:cats) OR topics.archetype = :pm",
-              cats: category_ids,
-              pm: Archetype.private_message,
-            )
-        else
-          posts = posts.where(topics: { archetype: Archetype.private_message })
-        end
+        posts =
+          posts.where(
+            "topics.archetype = :pm OR (#{category_condition})",
+            category_params.merge(pm: Archetype.private_message),
+          )
 
         # PM scope filter
         case pm_scope
@@ -103,6 +96,18 @@ module DiscourseAi
         posts = posts.or(banner_posts)
 
         posts
+      end
+
+      def self.progress_cache_key
+        [
+          "ai-translations-progress",
+          SiteSetting.content_localization_supported_locales,
+          SiteSetting.ai_translation_backfill_max_age_days,
+          SiteSetting.ai_translation_include_bot_content,
+          SiteSetting.ai_translation_max_post_length,
+          SiteSetting.ai_translation_personal_messages,
+          DiscourseAi::Translation.category_scope_cache_key,
+        ].join(":")
       end
 
       def self.completion_all_locales

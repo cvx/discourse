@@ -36,10 +36,6 @@ de:
       llm_triage:
         title: Beiträge mithilfe von KI sortieren
         description: "Beiträge mithilfe eines großen Sprachmodells sortieren"
-        flagged_post: |
-          <div>Antwort des Modells:</div>
-          <p>%{llm_response}</p>
-          <b>Ausgelöst durch die Regel <a href="%{base_path}/admin/plugins/automation/%{automation_id}">%{automation_name}</a>.</b>
         notify_author_pm:
           subject: "Dein Beitrag wurde vorübergehend zur Überprüfung entfernt"
           body: |
@@ -74,7 +70,6 @@ de:
     ai_sentiment_enabled: "Aktiviere das Stimmungsmodul."
     ai_sentiment_inference_service_api_endpoint: "URL, unter der die API für das Stimmungsmodul läuft"
     ai_sentiment_inference_service_api_key: "API-Schlüssel für die Stimmungsmodul-API"
-    ai_sentiment_models: "Modelle, die für die Inferenz verwendet werden. Das Stimmungsmodul klassifiziert Beiträge in den Bereichen positiv/neutral/negativ. Emotionen werden in die Bereiche Wut/Ekel/Furcht/Freude/neutral/Traurigkeit/Überraschung eingeordnet."
     ai_nsfw_detection_enabled: "Aktiviere das NSFW-Modul."
     ai_nsfw_inference_service_api_endpoint: "URL, unter der die API für das NSFW-Modul läuft"
     ai_nsfw_inference_service_api_key: "API-Schlüssel für die NSFW-API"
@@ -135,7 +130,6 @@ de:
     ai_discord_search_agent: "Der Agent, der für die Discord-Suche verwendet wird."
     ai_discord_allowed_guilds: "Discord-Gilden (Server), auf denen der Bot suchen darf"
     ai_translation_enabled: "KI-Übersetzungsfunktion aktivieren"
-    ai_translation_target_categories: "Es werden nur Inhalte aus den ausgewählten Kategorien übersetzt. Unterkategorien müssen separat hinzugefügt werden. Lass das Feld leer, um die Übersetzung von Themen in Kategorien zu deaktivieren."
     ai_translation_personal_messages: "Legt fest, welche persönlichen Nachrichten übersetzt werden. „none“ deaktiviert die Übersetzung von privaten Nachrichten. „group“ übersetzt nur private Gruppennachrichten. „all“ übersetzt alle privaten Nachrichten."
     ai_translation_include_bot_content: "Wenn diese Option aktiviert ist, werden auch Inhalte, die von Bots (Benutzer-IDs unter 0) geschrieben wurden, zur Übersetzung gesendet."
     ai_translation_max_post_length: "Die maximale Zeichenanzahl eines zu übersetzenden Beitrags. Längere Beiträge werden nicht übersetzt."
@@ -549,6 +543,8 @@ de:
         categories: "Kategorien auflisten"
         flag_post: "Beitrag melden"
         close_topic: "Thema schließen"
+        suspend_user: "Benutzer sperren"
+        silence_user: "Benutzer stummschalten"
         unlist_topic: "Thema aus der Liste entfernen"
         lock_post: "Beitrag sperren"
         delete_topic: "Thema löschen"
@@ -559,7 +555,7 @@ de:
         set_slow_mode: "Langsamen Modus aktivieren"
         move_posts: "Beiträge verschieben"
         grant_badge: "Abzeichen verleihen"
-        list_reviewables: "Liste der Warteschlange zur Überprüfung"
+        list_reviewables: "Warteschlange zur Überprüfung auflisten"
         perform_reviewable_action: "Aktion der Warteschlange zur Überprüfung"
         assign: "Thema zuordnen"
         mark_as_solved: "Als gelöst markieren"
@@ -604,7 +600,7 @@ de:
         set_slow_mode: "Den langsamen Modus für ein Thema aktivieren oder deaktivieren"
         move_posts: "Beiträge in ein neues oder vorhandenes Thema verschieben"
         grant_badge: "Einem Benutzer ein Abzeichen verleihen"
-        list_reviewables: "Ausstehende Listeneinträge der Warteschlange zur Überprüfung mit optionaler Filterung"
+        list_reviewables: "Ausstehende Einträge der Warteschlange zur Überprüfung mit optionaler Filterung auflisten"
         perform_reviewable_action: "Eine Aktion für einen Eintrag in der Warteschlange zur Überprüfung ausführen"
         assign: "Einem Benutzer oder einer Gruppe ein Thema zuweisen oder die Zuweisung aufheben"
         mark_as_solved: "Einen Beitrag als akzeptierte Lösung markieren oder die Markierung aufheben"
@@ -705,6 +701,12 @@ de:
           not_allowed: "Du darfst dieses Thema nicht schließen oder öffnen."
           no_reason: "Zum Schließen oder Öffnen eines Themas ist eine Begründung erforderlich."
         success: "Thema erfolgreich aktualisiert."
+      suspend_user:
+        errors:
+          not_found: "Benutzer nicht gefunden."
+      silence_user:
+        errors:
+          not_found: "Benutzer nicht gefunden."
       unlist_topic:
         errors:
           not_found: "Thema nicht gefunden."
@@ -810,6 +812,10 @@ de:
           conflict: "Dieser Eintrag in der Warteschlange zur Überprüfung wurde von einer anderen Person aktualisiert. Bitte versuche es erneut."
           action_failed: "Die Aktion konnte nicht ausgeführt werden"
         success: "Die Ausführung von '%{action}' für den Eintrag %{reviewable_id} in der Warteschlange zur Überprüfung war erfolgreich."
+      add_reviewable_note:
+        errors:
+          not_allowed: "Du darfst auf die Warteschlange zur Überprüfung nicht zugreifen"
+          not_found: "Eintrag der Warteschlange nicht gefunden"
     reviewables:
       ai_tool_action:
         title: "KI-Tool Aktion"
@@ -821,6 +827,7 @@ de:
         tool_not_found: "Das Tool '%{tool_name}' ist nicht mehr verfügbar."
         bot_user_missing: "Der Bot-Benutzer existiert nicht mehr."
         execution_error: "Tool-Ausführung fehlgeschlagen: %{error}"
+        execution_error_unknown: "ein unerwarteter Fehler ist aufgetreten"
     summarization:
       configuration_hint:
         one: "Konfiguriere zunächst die Einstellung `%{setting}`."
@@ -893,7 +900,6 @@ de:
       limit_exceeded_admin: "Du hast dein KI-Guthabenlimit erreicht. Bitte versuche es erneut nach %{reset_time}."
     errors:
       quota_exceeded: "Du hast das Kontingent für dieses Modell überschritten. Bitte versuche es erneut in %{relative_time}."
-      quota_required: "Du musst die maximale Anzahl an Token oder Verwendungen für dieses Modell angeben"
       no_query_specified: Der Abfrageparameter ist erforderlich, bitte gib ihn an.
       no_user_for_agent: Der angegebene Agent hat keinen Benutzer, der mit ihm verbunden ist.
       no_user_specified: Der Benutzername oder der Parameter user_unique_id ist erforderlich. Bitte gib ihn an.

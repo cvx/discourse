@@ -8,18 +8,22 @@ import DPageHeader from "discourse/ui-kit/d-page-header";
 import { i18n } from "discourse-i18n";
 
 export default <template>
-  {{#if @controller.siteSettings.dashboard_improvements}}
+  {{#if @controller.showRedesign}}
     <RedesignedAdminDashboard
-      @period={{@controller.safePeriod}}
-      @startDate={{@controller.startDate}}
-      @endDate={{@controller.endDate}}
+      @requestedPeriod={{@controller.safePeriod}}
+      @requestedStartDate={{@controller.startDate}}
+      @requestedEndDate={{@controller.endDate}}
       @setPeriod={{@controller.setPeriod}}
       @setCustomDateRange={{@controller.setCustomDateRange}}
-      @sections={{@controller.sections}}
-      @configuration={{@controller.configuration}}
-      @updateConfiguration={{@controller.updateConfiguration}}
+      @loadedSections={{@controller.loadedSections}}
+      @toggleSection={{@controller.toggleSection}}
+      @reorderSections={{@controller.reorderSections}}
+      @refreshSections={{@controller.fetchSections}}
       @loadingSections={{@controller.loadingSections}}
       @sectionsFetchError={{@controller.sectionsFetchError}}
+      @problems={{@controller.problems}}
+      @onRefreshProblems={{@controller.refreshSiteAdvice}}
+      @onIgnoreProblem={{@controller.ignoreProblem}}
     />
   {{else}}
     <PluginOutlet @name="admin-dashboard-top" @connectorTagName="div" />
@@ -92,7 +96,7 @@ export default <template>
 
         {{#if @controller.isReportsTabVisible}}
           <li class="navigation-item reports">
-            <LinkTo @route="admin.dashboardReports" class="navigation-link">
+            <LinkTo @route="adminReports" class="navigation-link">
               {{i18n "admin.dashboard.reports_tab"}}
             </LinkTo>
           </li>

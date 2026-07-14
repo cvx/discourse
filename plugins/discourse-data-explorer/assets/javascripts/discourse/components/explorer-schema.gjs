@@ -7,6 +7,8 @@ import withEventValue from "discourse/helpers/with-event-value";
 import { debounce } from "discourse/lib/decorators";
 import DButton from "discourse/ui-kit/d-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
+import { i18n } from "discourse-i18n";
 import OneTable from "./explorer-schema/one-table";
 
 export default class ExplorerSchema extends Component {
@@ -80,7 +82,6 @@ export default class ExplorerSchema extends Component {
         continue;
       }
 
-      // Check the table name vs the filter
       if (filter.source === key || filter.source + "s" === key) {
         tables.unshift({
           name: key,
@@ -88,14 +89,12 @@ export default class ExplorerSchema extends Component {
           open: haveFilter,
         });
       } else if (filter.test(key)) {
-        // whole table matches
         tables.push({
           name: key,
           columns: this.transformedSchema[key],
           open: haveFilter,
         });
       } else {
-        // filter the columns
         let filterCols = [];
         this.transformedSchema[key].forEach((col) => {
           if (filter.source === col.column_name) {
@@ -143,19 +142,24 @@ export default class ExplorerSchema extends Component {
       <DButton
         @action={{this.expandSchema}}
         @icon="chevron-left"
-        class="no-text unhide"
+        @ariaLabel="explorer.schema.show"
+        class="schema__toggle --expand no-text unhide"
       />
     {{else}}
       <div class="schema">
-        <div class="schema-search inline-form full-width">
+        <div class="schema-search">
+          {{dIcon "magnifying-glass" class="schema-search__icon"}}
           <input
             type="text"
+            class="schema-search__input"
+            placeholder={{i18n "explorer.schema.search_tables"}}
             {{on "input" (withEventValue this.filterChanged)}}
           />
           <DButton
             @action={{this.collapseSchema}}
             @icon="chevron-right"
-            class="no-text"
+            @ariaLabel="explorer.schema.hide"
+            class="schema__toggle --collapse no-text"
           />
         </div>
 

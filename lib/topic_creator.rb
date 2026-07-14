@@ -6,7 +6,7 @@ class TopicCreator
   include HasErrors
 
   def self.create(user, guardian, opts)
-    self.new(user, guardian, opts).create
+    new(user, guardian, opts).create
   end
 
   def initialize(user, guardian, opts)
@@ -172,7 +172,7 @@ class TopicCreator
     topic_params[:subtype] = TopicSubtype.moderator_warning if @opts[:is_warning]
 
     category = find_category
-    unless (@opts[:skip_validations] || @opts[:archetype] == Archetype.private_message)
+    unless @opts[:skip_validations] || @opts[:archetype] == Archetype.private_message
       @guardian.ensure_can_create!(Topic, category)
     end
 
@@ -356,6 +356,7 @@ class TopicCreator
              @guardian.can_send_private_message?(
                obj,
                notify_moderators: topic&.subtype == TopicSubtype.notify_moderators,
+               private_message_context: @opts[:private_message_context],
              )
       rollback_with!(topic, :cant_send_pm)
     end

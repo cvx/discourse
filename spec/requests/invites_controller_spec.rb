@@ -1153,6 +1153,7 @@ RSpec.describe InvitesController do
 
       it "fails when discourse connect is enabled" do
         SiteSetting.discourse_connect_url = "https://example.com/sso"
+        SiteSetting.discourse_connect_secret = "x" * 10
         SiteSetting.enable_discourse_connect = true
 
         put "/invites/show/#{invite.invite_key}.json"
@@ -1895,25 +1896,25 @@ RSpec.describe InvitesController do
     end
 
     context "while logged in" do
-      let(:csv_file) { File.new("#{Rails.root}/spec/fixtures/csv/discourse.csv") }
+      let(:csv_file) { File.new("#{Rails.root.join("spec/fixtures/csv/discourse.csv")}") }
       let(:file) { Rack::Test::UploadedFile.new(File.open(csv_file)) }
 
       let(:csv_file_with_headers) do
-        File.new("#{Rails.root}/spec/fixtures/csv/discourse_headers.csv")
+        File.new("#{Rails.root.join("spec/fixtures/csv/discourse_headers.csv")}")
       end
       let(:file_with_headers) { Rack::Test::UploadedFile.new(File.open(csv_file_with_headers)) }
       let(:csv_file_with_locales) do
-        File.new("#{Rails.root}/spec/fixtures/csv/invites_with_locales.csv")
+        File.new("#{Rails.root.join("spec/fixtures/csv/invites_with_locales.csv")}")
       end
       let(:file_with_locales) { Rack::Test::UploadedFile.new(File.open(csv_file_with_locales)) }
       let(:csv_file_with_malicious_headers) do
-        File.new("#{Rails.root}/spec/fixtures/csv/invite_malicious_headers.csv")
+        File.new("#{Rails.root.join("spec/fixtures/csv/invite_malicious_headers.csv")}")
       end
       let(:file_with_malicious_headers) do
         Rack::Test::UploadedFile.new(File.open(csv_file_with_malicious_headers))
       end
       let(:csv_file_with_valid_and_invalid_headers) do
-        File.new("#{Rails.root}/spec/fixtures/csv/invite_valid_and_invalid_headers.csv")
+        File.new("#{Rails.root.join("spec/fixtures/csv/invite_valid_and_invalid_headers.csv")}")
       end
       let(:file_with_valid_and_invalid_headers) do
         Rack::Test::UploadedFile.new(File.open(csv_file_with_valid_and_invalid_headers))
@@ -1934,6 +1935,7 @@ RSpec.describe InvitesController do
 
       it "allows admin to bulk invite when DiscourseConnect enabled" do
         SiteSetting.discourse_connect_url = "https://example.com"
+        SiteSetting.discourse_connect_secret = "x" * 10
         SiteSetting.enable_discourse_connect = true
 
         sign_in(admin)

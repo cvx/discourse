@@ -60,7 +60,6 @@ he:
     ai_sentiment_enabled: "הפעלת מודול התחושה."
     ai_sentiment_inference_service_api_endpoint: "הכתובת בה נמצא ה־API הפעיל עבור מודול התחושה"
     ai_sentiment_inference_service_api_key: "מפתח API ל־API של התחושה"
-    ai_sentiment_models: "מודלים לטובת הסקת מסקנות. תחושה מסווגת את הפוסט על המנעד של חיובי/נייטרלי/שלילי. רגש מסווג על המנעד של כעס/גועל/פחד/שמחה/נייטרליות/עצב/הפתעה."
     ai_nsfw_detection_enabled: "הפעלת מודול הפוגענות."
     ai_nsfw_inference_service_api_endpoint: "הכתובת בה נמצא ה־API הפעיל עבור מודול הפוגענות"
     ai_nsfw_inference_service_api_key: "מפתח API ל־API לתכנים פוגעניים"
@@ -435,6 +434,8 @@ he:
         random_picker: "בורר אקראי"
         categories: "הצגת קטגוריות"
         flag_post: "סימון פוסט"
+        suspend_user: "השעיית משתמש"
+        silence_user: "השתקת משתמש"
         edit_post: "עריכת פוסט"
         search: "חיפוש"
         tags: "הצגת תגיות"
@@ -644,7 +645,7 @@ he:
         all_posts_translated: "כל הפוסטים בנושא הזה כבר מתורגמים."
     errors:
       quota_exceeded: "חרגת מהמכסה למודל הזה. נא לנסות שוב בעוד %{relative_time}."
-      quota_required: "יש לציין את כמות האסימונים המרבית לשימוש למודל הזה"
+      quota_required: "חובה לציין כמות אסימונים מרבית, שימושים או עלות למודל הזה"
       no_query_specified: משתנה השאילתה נחוץ, נא לציין אותו.
       no_user_specified: המשתנים username או user_unique_id נחוצים, נא לציין לפחות אחד מהם.
       user_not_found: המשתמש שצוין לא קיים. נא לבדוק את המשתנה username.

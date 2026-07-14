@@ -4,6 +4,7 @@ import { action } from "@ember/object";
 import { service } from "@ember/service";
 import DMenu from "discourse/float-kit/components/d-menu";
 import DTooltip from "discourse/float-kit/components/d-tooltip";
+import { deferAnonymousAction } from "discourse/lib/anonymous-action";
 import { NotificationLevels } from "discourse/lib/notification-levels";
 import { applyBehaviorTransformer } from "discourse/lib/transformer";
 import { and, eq, not } from "discourse/truth-helpers";
@@ -14,7 +15,6 @@ import { i18n } from "discourse-i18n";
 
 export default class VoteBox extends Component {
   @service currentUser;
-  @service router;
 
   @tracked hasVoted = false;
   @tracked hasSeenSuccessMenu = false;
@@ -70,9 +70,14 @@ export default class VoteBox extends Component {
       this.hasSeenSuccessMenu = false;
     }
 
-    applyBehaviorTransformer("topic-vote-button-click", () => {
+    applyBehaviorTransformer("topic-vote-button-click", async () => {
       if (!this.currentUser) {
-        return this.router.transitionTo("login");
+        if (this.topic.archived || this.topic.closed) {
+          return;
+        }
+        return deferAnonymousAction(this, "vote_topic", {
+          topic_id: this.topic.id,
+        });
       }
 
       if (this.currentUser.vote_limit === 0) {
@@ -166,6 +171,7 @@ export default class VoteBox extends Component {
         @icon={{this.buttonIcon}}
         @onShow={{this.onShowMenu}}
         @onClose={{this.onCloseMenu}}
+        @title={{this.ariaLabel}}
         @ariaLabel={{this.ariaLabel}}
         class={{this.buttonClasses}}
         @onRegisterApi={{this.onRegisterApi}}
@@ -261,6 +267,7 @@ export default class VoteBox extends Component {
       <DButton
         @icon={{this.buttonIcon}}
         @action={{this.onShowMenu}}
+        @translatedTitle={{this.ariaLabel}}
         @translatedAriaLabel={{this.ariaLabel}}
         class={{this.buttonClasses}}
       />

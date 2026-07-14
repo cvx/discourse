@@ -1,7 +1,7 @@
 import { fn } from "@ember/helper";
-import DesktopNotificationConfig from "discourse/components/desktop-notification-config";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import PreferenceCheckbox from "discourse/components/preference-checkbox";
+import PushNotificationSelect from "discourse/components/push-notification-select";
 import UserNotificationSchedule from "discourse/components/user-notification-schedule";
 import lazyHash from "discourse/helpers/lazy-hash";
 import ComboBox from "discourse/select-kit/components/combo-box";
@@ -43,7 +43,7 @@ export default <template>
       <label class="control-label">{{i18n
           "user.desktop_notifications.label"
         }}</label>
-      <DesktopNotificationConfig />
+      <PushNotificationSelect @model={{@controller.model}} />
       <div class="instructions">{{i18n
           "user.desktop_notifications.each_browser_note"
         }}</div>
@@ -56,6 +56,21 @@ export default <template>
       </span>
     </div>
   {{/unless}}
+
+  {{#if @controller.model.admin}}
+    <div class="control-group upcoming-changes">
+      <label class="control-label">{{i18n
+          "user.upcoming_changes.title"
+        }}</label>
+
+      <PreferenceCheckbox
+        @labelKey="user.upcoming_changes.enable_available_notifications"
+        @checked={{@controller.model.user_option.enable_upcoming_change_available_notifications}}
+        data-setting-name="user-enable-upcoming-change-available-notifications"
+        class="pref-enable-upcoming-change-available-notifications"
+      />
+    </div>
+  {{/if}}
 
   <UserNotificationSchedule @model={{@controller.model}} />
 

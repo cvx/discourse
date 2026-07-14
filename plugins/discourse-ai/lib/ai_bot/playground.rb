@@ -356,10 +356,15 @@ module DiscourseAi
             cancel_manager: context.cancel_manager,
           )
 
+        pending_approvals = []
         new_prompts =
           bot.reply(context) do |partial, placeholder, type|
             # no support for thinking by design
             next if type == :thinking || type == :partial_tool
+            if type == :chat_approval
+              pending_approvals << partial
+              next
+            end
             streamer << partial
           end
 
@@ -371,6 +376,16 @@ module DiscourseAi
         if streamer
           streamer.done
           streamer = nil
+        end
+
+        pending_approvals.each do |pending_approval|
+          post_chat_tool_approval(
+            pending_approval,
+            channel: channel,
+            guardian: guardian,
+            thread_id: reply&.thread_id || message.reload.thread_id,
+            fallback_in_reply_to_id: message.id,
+          )
         end
 
         reply
@@ -408,6 +423,30 @@ module DiscourseAi
         streamer.done if streamer
       end
 
+      # Posts the queued tool action as its own chat message carrying the
+      # Approve/Reject blocks, in the same thread as the bot's reply so it sits
+      # with the conversation. It must be a fresh message (not an edit of the
+      # reply): the chat client only renders blocks present at message creation.
+      # Scoped to bot direct-message channels; elsewhere the reviewable is still
+      # created and remains actionable from /review.
+      def post_chat_tool_approval(info, channel:, guardian:, thread_id:, fallback_in_reply_to_id:)
+        return if !channel.direct_message_channel?
+
+        raw = +"**#{info[:summary]}**\n#{info[:details]}".strip
+        raw << "\n\n_#{I18n.t("discourse_ai.ai_bot.tool_pending_approval")}_"
+
+        ChatSDK::Message.create(
+          raw: raw,
+          channel_id: channel.id,
+          guardian: guardian,
+          thread_id: thread_id,
+          in_reply_to_id: thread_id ? nil : fallback_in_reply_to_id,
+          force_thread: thread_id.blank?,
+          enforce_membership: !channel.direct_message_channel?,
+          blocks: DiscourseAi::AiBot::ChatToolApproval.pending_blocks(info[:reviewable_id]),
+        )
+      end
+
       def reply_to(
         post,
         custom_instructions: nil,
@@ -439,7 +478,7 @@ module DiscourseAi
 
         post_type =
           (
-            if (whisper || post.post_type == Post.types[:whisper])
+            if whisper || post.post_type == Post.types[:whisper]
               Post.types[:whisper]
             else
               Post.types[:regular]
@@ -568,11 +607,17 @@ module DiscourseAi
             next if type == :structured_output && !partial.finished?
 
             if should_start_thinking?(partial:, context:, type:, started_thinking:, placeholder:)
+              reply << "\n\n" if reply.present? && !reply.end_with?("\n")
               reply << "<details class='ai-thinking'><summary>#{I18n.t("discourse_ai.ai_bot.thinking")}</summary>\n\n"
               started_thinking = true
             elsif should_stop_thinking?(partial:, context:, type:, started_thinking:, placeholder:)
               reply << "</details>\n\n"
               started_thinking = false
+            end
+
+            if type == :thinking && partial.present? && placeholder.blank? && started_thinking &&
+                 !reply.end_with?("\n")
+              reply << "\n\n"
             end
 
             reply << partial
@@ -592,6 +637,11 @@ module DiscourseAi
           end
 
         return if reply.blank? || silent_mode
+
+        if started_thinking
+          reply << "\n\n</details>"
+          started_thinking = false
+        end
 
         if stream_reply
           post_streamer.finish

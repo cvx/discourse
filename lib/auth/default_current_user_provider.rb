@@ -44,6 +44,14 @@ class Auth::DefaultCurrentUserProvider
 
   TOKEN_SIZE = 32
 
+  def self.shared_session_redis_key(key)
+    "shared_session_user_auth_token_id:#{key}"
+  end
+
+  def self.store_shared_session_key(key, token_id)
+    Discourse.redis.setex(shared_session_redis_key(key), 7.days, token_id)
+  end
+
   PARAMETER_API_PATTERNS = [
     RouteMatcher.new(
       methods: :get,
@@ -101,9 +109,13 @@ class Auth::DefaultCurrentUserProvider
 
     # bypass if we have the shared session header
     if shared_key = @env["HTTP_X_SHARED_SESSION_KEY"]
-      uid = Discourse.redis.get("shared_session_key_#{shared_key}")
+      token_id = Discourse.redis.get(self.class.shared_session_redis_key(shared_key))
       user = nil
-      user = User.find_by(id: uid.to_i) if uid
+      if token_id
+        token = UserAuthToken.unexpired.find_by(id: token_id)
+        user = token&.user
+        user = nil if user && (user.suspended? || !user.active)
+      end
       @env[CURRENT_USER_KEY] = user
       return user
     end
@@ -369,12 +381,12 @@ class Auth::DefaultCurrentUserProvider
   # api has special rights return true if api was detected
   def is_api?
     current_user
-    !!(@env[API_KEY_ENV])
+    !!@env[API_KEY_ENV]
   end
 
   def is_user_api?
     current_user
-    !!(@env[USER_API_KEY_ENV])
+    !!@env[USER_API_KEY_ENV]
   end
 
   def has_auth_cookie?
@@ -485,12 +497,10 @@ class Auth::DefaultCurrentUserProvider
     return @auth_token if defined?(@auth_token)
 
     @auth_token =
-      begin
-        if v0 = self.class.find_v0_auth_cookie(@request)
-          v0
-        elsif v1 = self.class.find_v1_auth_cookie(@env)
-          v1[:token] if v1[:issued_at] >= SiteSetting.maximum_session_age.hours.ago.to_i
-        end
+      if v0 = self.class.find_v0_auth_cookie(@request)
+        v0
+      elsif v1 = self.class.find_v1_auth_cookie(@env)
+        v1[:token] if v1[:issued_at] >= SiteSetting.maximum_session_age.hours.ago.to_i
       end
   end
 end

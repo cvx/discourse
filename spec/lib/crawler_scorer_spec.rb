@@ -25,6 +25,33 @@ RSpec.describe CrawlerScorer do
     expect(event.reload.score).to eq(100)
   end
 
+  it "writes the score breakdown per heuristic to the side table" do
+    SiteSetting.crawler_asns = "12345"
+    event =
+      make_event(
+        user_agent: "Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/120.0.0.0",
+        asn: 12_345,
+      )
+
+    score!
+
+    expect(event.reload.score).to eq(115)
+    breakdown = event.browser_pageview_event_score
+    expect(breakdown.automation_ua_score).to eq(100)
+    expect(breakdown.known_asn_score).to eq(15)
+    expect(breakdown.velocity_score).to eq(0)
+    expect(breakdown.churn_score).to eq(0)
+    expect(breakdown.rapid_nav_score).to eq(0)
+    expect(breakdown.referrer_score).to eq(0)
+  end
+
+  it "does not write a breakdown row for events that score 0" do
+    event = make_event
+    score!
+    expect(event.reload.score).to be_nil
+    expect(event.browser_pageview_event_score).to be_nil
+  end
+
   it "scores known crawler ASNs at +15" do
     SiteSetting.crawler_asns = "12345"
     event = make_event(asn: 12_345)
@@ -118,5 +145,41 @@ RSpec.describe CrawlerScorer do
     score!
 
     expect(event.reload.score).to eq(120)
+  end
+
+  it "scores each source but partitions velocity so transports do not inflate each other" do
+    stub_const(CrawlerScorer, :VELOCITY_LOW, 10) do
+      stub_const(CrawlerScorer, :VELOCITY_MEDIUM, 20) do
+        base = 30.minutes.ago
+
+        # Same ip+ua, split across two transports with 12 pageviews each. On
+        # its own each source sits in the LOW velocity tier (+10). Combined they
+        # would be 24 pageviews and reach the MEDIUM tier (+20), so equal
+        # per-source scores prove the heuristics stay partitioned by source.
+        {
+          BrowserPageviewEvent::SOURCE_PIGGYBACK => "piggyback-session",
+          BrowserPageviewEvent::SOURCE_BEACON => "beacon-session",
+        }.each do |source, session_id|
+          12.times do |i|
+            make_event(source: source, session_id: session_id, created_at: base + (i * 15).seconds)
+          end
+        end
+
+        score!
+
+        expect(
+          BrowserPageviewEvent
+            .where(source: BrowserPageviewEvent::SOURCE_PIGGYBACK)
+            .pluck(:score)
+            .uniq,
+        ).to contain_exactly(10)
+        expect(
+          BrowserPageviewEvent
+            .where(source: BrowserPageviewEvent::SOURCE_BEACON)
+            .pluck(:score)
+            .uniq,
+        ).to contain_exactly(10)
+      end
+    end
   end
 end

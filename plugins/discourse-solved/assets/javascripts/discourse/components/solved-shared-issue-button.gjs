@@ -11,18 +11,22 @@ import { i18n } from "discourse-i18n";
 export default class SolvedSharedIssueButton extends Component {
   @service currentUser;
   @service router;
+  @service siteSettings;
 
   @tracked saving = false;
 
   get show() {
+    const topic = this.args.post.topic;
+    const hasAcceptedAnswers = topic.accepted_answers?.length > 0;
+
     return (
-      this.args.post.topic.shared_issue_visible &&
-      !this.args.post.topic.accepted_answer
+      topic.shared_issue_visible &&
+      (!hasAcceptedAnswers || this.siteSettings.solved_allow_multiple_solutions)
     );
   }
 
   get count() {
-    return this.args.post.topic.shared_issue_count ?? 1;
+    return this.args.post.topic.shared_issue_count ?? 0;
   }
 
   get hasSharedIssue() {
@@ -33,17 +37,47 @@ export default class SolvedSharedIssueButton extends Component {
     return this.currentUser && this.currentUser.id === this.args.post.user_id;
   }
 
+  get isClosed() {
+    return this.args.post.topic.closed;
+  }
+
+  get isArchived() {
+    return this.args.post.topic.archived;
+  }
+
   get disabled() {
-    return this.saving || this.isTopicAuthor;
+    return (
+      this.saving || this.isTopicAuthor || this.isClosed || this.isArchived
+    );
+  }
+
+  get titleKey() {
+    if (this.isTopicAuthor) {
+      return "solved.shared_issue.author_title";
+    }
+    if (this.isClosed) {
+      return "solved.shared_issue.closed_title";
+    }
+    if (this.isArchived) {
+      return "solved.shared_issue.archived_title";
+    }
+    return "solved.shared_issue.title";
   }
 
   get label() {
-    return i18n("solved.shared_issue.label", { count: this.count });
+    const label = i18n("solved.shared_issue.label");
+    if (this.count === 0) {
+      return label;
+    }
+    return i18n("solved.shared_issue.label_with_count", {
+      label,
+      count: this.count,
+    });
   }
 
   @action
   async toggle() {
-    if (this.isTopicAuthor) {
+    if (this.isTopicAuthor || this.isClosed || this.isArchived) {
       return;
     }
 
@@ -78,18 +112,14 @@ export default class SolvedSharedIssueButton extends Component {
             "btn-default"
             "post-action-menu__solved-shared-issue"
             (if this.hasSharedIssue "has-shared-issue")
-            (if this.isTopicAuthor "disabled")
+            (if this.disabled "disabled")
           }}
           ...attributes
           @action={{this.toggle}}
           @disabled={{this.disabled}}
           @icon="hand"
           @translatedLabel={{this.label}}
-          @title={{if
-            this.isTopicAuthor
-            "solved.shared_issue.author_title"
-            "solved.shared_issue.title"
-          }}
+          @title={{this.titleKey}}
         />
       </div>
     {{/if}}

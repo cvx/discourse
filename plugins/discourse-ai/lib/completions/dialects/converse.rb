@@ -56,7 +56,7 @@ module DiscourseAi
         end
 
         def max_prompt_tokens
-          llm_model.max_prompt_tokens
+          max_prompt_tokens_with_reserved_output
         end
 
         def native_tool_support?
@@ -137,7 +137,11 @@ module DiscourseAi
             image: {
               format: details[:format] || detect_format(details[:mime_type]),
               source: {
-                bytes: details[:base64],
+                # AWS SDK for Ruby expects raw bytes here and will base64-encode them
+                # on the wire. Passing the already-base64-encoded string causes Bedrock
+                # to receive doubly-encoded data and respond with
+                # "Could not process image".
+                bytes: Base64.decode64(details[:base64]),
               },
             },
           }

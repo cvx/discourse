@@ -46,6 +46,7 @@ DiscourseAi::Engine.routes.draw do
 
   scope module: :ai_bot, path: "/ai-bot/conversations" do
     get "/" => "conversations#index"
+    post "/" => "conversations#create"
     put "/:topic_id/starred" => "conversations#update_starred"
   end
 
@@ -63,6 +64,7 @@ DiscourseAi::Engine.routes.draw do
 
   scope module: :summarization, path: "/summarization", defaults: { format: :json } do
     get "/t/:topic_id" => "summary#show", :constraints => { topic_id: /\d+/ }
+    post "/t/:topic_id" => "summary#create", :constraints => { topic_id: /\d+/ }
     put "/regen_gist" => "summary#regen_gist"
     put "/regen_summary" => "summary#regen_summary"
     post "/channels/:channel_id" => "chat_summary#show"
@@ -89,6 +91,9 @@ Discourse::Application.routes.draw do
       :constraints => StaffConstraint.new
 
   scope "/admin/plugins/discourse-ai", constraints: AdminConstraint.new do
+    get "/admin-dashboard-highlights" => "discourse_ai/admin/admin_dashboard_highlights#show",
+        :format => :json
+
     get "/ai-personas", to: redirect("/admin/plugins/discourse-ai/ai-agents")
     get "/ai-personas/new", to: redirect("/admin/plugins/discourse-ai/ai-agents/new")
     get "/ai-personas/:id/edit", to: redirect("/admin/plugins/discourse-ai/ai-agents/%{id}/edit")

@@ -35,7 +35,6 @@ import {
   initUserStatusHtml,
   renderUserStatusHtml,
 } from "discourse/lib/user-status-on-autocomplete";
-import { optionalRequire } from "discourse/lib/utilities";
 import virtualElementFromTextRange from "discourse/lib/virtual-element-from-text-range";
 import { waitForClosedKeyboard } from "discourse/lib/wait-for-keyboard";
 import forceScrollingElementPosition from "discourse/modifiers/force-scrolling-element-position";
@@ -53,6 +52,9 @@ import ChatReplyingIndicator from "discourse/plugins/chat/discourse/components/c
 import { chatComposerButtons } from "discourse/plugins/chat/discourse/lib/chat-composer-buttons";
 import ChatMessageInteractor from "discourse/plugins/chat/discourse/lib/chat-message-interactor";
 import TextareaInteractor from "discourse/plugins/chat/discourse/lib/textarea-interactor";
+import LocalDatesCreateModal from "discourse/plugins/discourse-local-dates/discourse/components/modal/local-dates-create" with {
+  discourseImport: "optional",
+};
 
 const CHAT_PRESENCE_KEEP_ALIVE = 5 * 1000; // 5 seconds
 
@@ -175,6 +177,24 @@ export default class ChatComposer extends Component {
     );
   }
 
+  get disabled() {
+    return !this.currentUser || this.args.disabled;
+  }
+
+  @action
+  focusOrPromptLogin() {
+    if (!this.currentUser) {
+      this.showLogin();
+      return;
+    }
+
+    this.composer.focus();
+  }
+
+  showLogin() {
+    getOwner(this).lookup("route:application").send("showLogin");
+  }
+
   @action
   setup() {
     this.composer.scroller = this.args.scroller;
@@ -199,10 +219,6 @@ export default class ChatComposer extends Component {
 
   @action
   insertDiscourseLocalDate() {
-    const LocalDatesCreateModal = optionalRequire(
-      "discourse/plugins/discourse-local-dates/discourse/components/modal/local-dates-create"
-    );
-
     this.modal.show(LocalDatesCreateModal, {
       model: {
         insertDate: (markup) => {
@@ -244,18 +260,18 @@ export default class ChatComposer extends Component {
 
     this.inProgressUploadsCount = inProgressUploadsCount || 0;
 
+    this.composer.textarea?.focus();
+    this.reportReplyingPresence();
+
+    // Only persist once uploads settle.
     if (
       typeof uploads !== "undefined" &&
-      inProgressUploadsCount !== "undefined" &&
       inProgressUploadsCount === 0 &&
       this.draft
     ) {
       this.draft.uploads = cloneJSON(uploads);
+      this.persistDraft();
     }
-
-    this.composer.textarea?.focus();
-    this.reportReplyingPresence();
-    this.persistDraft();
   }
 
   @action
@@ -265,6 +281,11 @@ export default class ChatComposer extends Component {
 
   @action
   async onSend(event) {
+    if (!this.currentUser) {
+      this.showLogin();
+      return;
+    }
+
     if (!this.sendEnabled) {
       return;
     }
@@ -368,6 +389,11 @@ export default class ChatComposer extends Component {
 
   @action
   onTextareaFocusIn() {
+    if (!this.currentUser) {
+      this.showLogin();
+      return;
+    }
+
     this.forceScrollPosition();
     this.isFocused = true;
   }
@@ -425,12 +451,14 @@ export default class ChatComposer extends Component {
     }
 
     const selected = this.composer.textarea.getSelected("", { lineVal: true });
-    const linkText = selected?.value;
+    const hasSelection = !!selected && selected.start !== selected.end;
     this.modal.show(UpsertHyperlink, {
       model: {
-        linkText,
+        hasSelection,
         toolbarEvent: {
+          selected,
           addText: (text) => this.composer.textarea.addText(selected, text),
+          applyLink: (url) => this.composer.textarea.applyLink(url),
         },
       },
     });
@@ -440,7 +468,7 @@ export default class ChatComposer extends Component {
   onSelectEmoji(emoji, context = {}) {
     const textareaInteractor = this.composer.textarea;
 
-    if (context.emojiTermStart && context.emojiTermStart) {
+    if (context?.emojiTermStart != null) {
       const value = textareaInteractor.textarea.value;
       const valueUpToCursor = `${value.substring(0, context.emojiTermStart)}:${emoji}: `;
       const valueAfterCursor = value.substring(context.emojiTermEnd + 1);
@@ -580,7 +608,8 @@ export default class ChatComposer extends Component {
 
           if (currentValue && currentCaretPos !== undefined) {
             const textBeforeCursor = currentValue.substring(0, currentCaretPos);
-            const incompleteMatch = textBeforeCursor.match(/(:[\w-]+)$/);
+            const incompleteMatch =
+              textBeforeCursor.match(/(:[\p{L}\p{N}_-]+)$/u);
 
             if (incompleteMatch) {
               emojiContext = {
@@ -768,7 +797,7 @@ export default class ChatComposer extends Component {
 
             <div
               class="chat-composer__input-container"
-              {{on "click" this.composer.focus}}
+              {{on "click" this.focusOrPromptLogin}}
             >
               <DTextarea
                 {{preventScrollOnFocus}}

@@ -145,6 +145,7 @@ class PostMover
     update_last_post_stats
     update_upload_security_status
     update_bookmarks
+    update_reviewables
 
     close_topic_and_schedule_deletion if @full_move
 
@@ -722,14 +723,12 @@ class PostMover
 
   def posts
     @posts ||=
-      begin
-        Post
-          .where(topic: @original_topic, id: post_ids)
-          .where.not(post_type: Post.types[:small_action])
-          .where.not(raw: "")
-          .order(:created_at)
-          .tap { |posts| raise Discourse::InvalidParameters.new(:post_ids) if posts.empty? }
-      end
+      Post
+        .where(topic: @original_topic, id: post_ids)
+        .where.not(post_type: Post.types[:small_action])
+        .where.not(raw: "")
+        .order(:created_at)
+        .tap { |posts| raise Discourse::InvalidParameters.new(:post_ids) if posts.empty? }
   end
 
   def update_last_post_stats
@@ -753,6 +752,13 @@ class PostMover
       Jobs.enqueue(:sync_topic_user_bookmarked, topic_id: @original_topic.id)
       Jobs.enqueue(:sync_topic_user_bookmarked, topic_id: @destination_topic.id)
     end
+  end
+
+  def update_reviewables
+    Reviewable.where(target_type: "Post", target_id: @post_ids).update_all(
+      topic_id: @destination_topic.id,
+      category_id: @destination_topic.category_id,
+    )
   end
 
   def watch_new_topic

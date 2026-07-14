@@ -32,6 +32,8 @@ export default class DashboardSection extends Component {
         <p class="db-section__intro">{{@description}}</p>
       {{/if}}
 
+      {{yield to="intro"}}
+
       <div
         class={{concat
           "db-section__wrapper "
@@ -41,6 +43,7 @@ export default class DashboardSection extends Component {
       >
         {{yield (hash startDate=@startDate endDate=@endDate)}}
       </div>
+      {{yield to="footer"}}
     </section>
   </template>
 }

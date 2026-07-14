@@ -5,6 +5,7 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { getOwner } from "@ember/owner";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import { scheduleOnce } from "@ember/runloop";
 import { service } from "@ember/service";
 import curryComponent from "ember-curry-component";
 import { getScrollParent } from "discourse/float-kit/lib/get-scroll-parent";
@@ -40,6 +41,8 @@ class FKForm extends Component {
 
   formData = new FKFormData(this.args.data ?? {});
 
+  #pendingRegistrations = new Set();
+
   constructor() {
     super(...arguments);
 
@@ -70,7 +73,7 @@ class FKForm extends Component {
 
   @action
   async checkIsDirty(transition) {
-    let triggerConfirm = false;
+    let triggerConfirm;
 
     // In some cases (e.g., subroute -> parent),
     // queryParamsOnly is true even though the route name changes
@@ -187,6 +190,11 @@ class FKForm extends Component {
     if (this.fieldValidationEvent === VALIDATION_TYPES.change) {
       await this.triggerRevalidationFor(name);
     }
+
+    if (this.args.onSet) {
+      await this.args.onSet(name, value, this.formData.draftData);
+      this.formData.save();
+    }
   }
 
   @action
@@ -219,14 +227,27 @@ class FKForm extends Component {
     }
 
     if (this.fields.has(name)) {
-      throw new Error(
-        `@name="${name}", is already in use. Names of \`<form.Field />\` must be unique!`
-      );
+      this.fields.delete(name);
     }
 
     this.fields.set(name, field);
 
+    if (this.fieldValidationEvent) {
+      this.#pendingRegistrations.add(field);
+      scheduleOnce("afterRender", this, this.validatePendingRegistrations);
+    }
+
     return field;
+  }
+
+  @action
+  async validatePendingRegistrations() {
+    if (this.#pendingRegistrations.size === 0) {
+      return;
+    }
+    const fields = [...this.#pendingRegistrations];
+    this.#pendingRegistrations.clear();
+    await this.validate(fields);
   }
 
   @action
@@ -280,7 +301,10 @@ class FKForm extends Component {
       return;
     }
 
-    if (this.formData.errors[name]) {
+    if (
+      this.fieldValidationEvent === VALIDATION_TYPES.change ||
+      this.formData.errors[name]
+    ) {
       await this.validate([field]);
     }
   }
@@ -374,6 +398,7 @@ const Form = <template>
       @validateOn={{@validateOn}}
       @onRegisterApi={{@onRegisterApi}}
       @onReset={{@onReset}}
+      @onSet={{@onSet}}
       @onDirtyCheck={{@onDirtyCheck}}
       ...attributes
       as |components draftData|

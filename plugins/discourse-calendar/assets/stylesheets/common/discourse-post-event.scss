@@ -148,7 +148,7 @@ $show-interested: inherit;
 
     .month {
       text-align: center;
-      color: red;
+      color: var(--primary);
       font-size: var(--font-down-2);
       font-weight: 400;
       text-transform: uppercase;
@@ -244,11 +244,20 @@ $show-interested: inherit;
         flex: 1;
       }
 
+      .going-button.d-combo-button {
+        flex: 1;
+
+        .d-combo-button-menu {
+          flex: 0 0 auto;
+        }
+      }
+
       .interested-button {
         display: $show-interested;
       }
 
-      &.status-going .going-button .d-icon {
+      &.status-going .going-button > .d-icon,
+      &.status-going .going-button .d-combo-button-button .d-icon {
         color: var(--success);
       }
 
@@ -495,6 +504,12 @@ $show-interested: inherit;
   }
 }
 
+.discourse-post-event-going-menu-content {
+  .--selected .d-icon {
+    color: var(--success);
+  }
+}
+
 .event-dates {
   // hardcoded as cooking date is async and will change height after initial rendering otherwise
   // not ideal but a decent low tech solution
@@ -515,5 +530,31 @@ $show-interested: inherit;
     color: var(--primary-high);
     margin: 0 0.5em;
     text-align: center;
+  }
+}
+
+.discourse-post-event {
+  .event__placeholder {
+    display: inline-block;
+    border-radius: var(--d-border-radius, 0.25em);
+    background-color: var(--primary-low);
+  }
+
+  .event__placeholder--text {
+    width: 8em;
+    height: 0.9em;
+    vertical-align: middle;
+  }
+
+  .event__placeholder--avatar {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+  }
+
+  .event__placeholder--button {
+    width: 5em;
+    height: 2em;
+    margin-right: 0.5em;
   }
 }
