@@ -1,6 +1,12 @@
 import { tracked } from "@glimmer/tracking";
 import { trackedObject } from "@ember/reactive/collections";
 import WarpRestModel from "discourse/data/warp-rest-model";
+import {
+  applyModelCallbacks,
+  applyRegisteredFields,
+  extraSavePropertiesFor,
+  modelNameFor,
+} from "discourse/lib/model-extensions";
 
 // Bridges Discourse's legacy `Store` + `RestModel` callsites to WarpRestModel.
 // Drop this layer (extend WarpRestModel directly) once a model's callers no
@@ -32,6 +38,27 @@ export default class RestCompatModel extends WarpRestModel {
   // flag lives on the wrapper because cached LegacyMode records reject any
   // field not declared in their schema.
   __isLocalDraft = false;
+
+  constructor() {
+    super(...arguments);
+
+    // Defines plugin-registered fields (see `addModelField`) as tracked
+    // properties on the wrapper. Plugin fields are outside the schema, so they
+    // live here rather than in the cache. A caller/server-provided value wins
+    // over the registered default. Existence is probed by reading (the `get`
+    // trap) rather than `in`: the `has` trap on a `trackedObject` draft is
+    // unreliable, and an explicit `undefined` is equivalent to omission here.
+    applyRegisteredFields(this, (name) => {
+      const value = this.__resource?.[name];
+      if (value !== undefined) {
+        return { value };
+      }
+    });
+
+    // Fires `init` callbacks (see `addModelCallback`) with the create args
+    // already in place, matching `RestModel`.
+    applyModelCallbacks(this.constructor.type, "init", this);
+  }
 
   _didReplaceResource() {
     this.__isLocalDraft = false;
@@ -104,16 +131,45 @@ export default class RestCompatModel extends WarpRestModel {
 
   // Legacy `RestModel#save`. If the subclass defines `static builders.save`,
   // delegate to `WarpRestModel.save` (builder-driven, WarpDrive path);
-  // otherwise branch on `isNew` and use the legacy adapter pipeline.
-  save(data) {
-    if (this.constructor.builders?.save) {
-      return super.save(data);
+  // otherwise branch on `isNew` and use the legacy adapter pipeline. The legacy
+  // branch fires create/update callbacks inside `_saveNew`/`update`.
+  async save(data) {
+    if (!this.constructor.builders?.save) {
+      return this.isNew ? this._saveNew(data) : this.update(data);
     }
-    return this.isNew ? this._saveNew(data) : this.update(data);
+
+    const modelName = this.constructor.type;
+    const creating = this.isNew;
+    const props = this.#withSaveProperties(data);
+
+    applyModelCallbacks(
+      modelName,
+      creating ? "beforeCreate" : "beforeUpdate",
+      this,
+      props
+    );
+    const result = await super.save(props);
+    await applyModelCallbacks(
+      modelName,
+      creating ? "afterCreate" : "afterUpdate",
+      this,
+      result
+    );
+    return result;
+  }
+
+  // Merges plugin-registered save properties (see `addModelSaveProperty`) into
+  // the outgoing payload. Returns `data` untouched when none are registered.
+  #withSaveProperties(data) {
+    const extras = extraSavePropertiesFor(this.constructor.type, this);
+    return Object.keys(extras).length ? { ...data, ...extras } : data;
   }
 
   async _saveNew(props) {
+    props = this.#withSaveProperties(props);
+    const modelName = this.constructor.type;
     return this.#withSaving(async () => {
+      applyModelCallbacks(modelName, "beforeCreate", this, props);
       const adapter = this.store.adapterFor(this.__type);
       const res = await adapter.createRecord(this.store, this.__type, props);
       if (res.payload) {
@@ -121,12 +177,16 @@ export default class RestCompatModel extends WarpRestModel {
         this.__state = "created";
       }
       res.target = this;
+      await applyModelCallbacks(modelName, "afterCreate", this, res);
       return res;
     });
   }
 
   async update(props) {
+    props = this.#withSaveProperties(props);
+    const modelName = this.constructor.type;
     return this.#withSaving(async () => {
+      applyModelCallbacks(modelName, "beforeUpdate", this, props);
       const res = await this.store.update(
         this.__type,
         this[this.primaryKey],
@@ -137,12 +197,25 @@ export default class RestCompatModel extends WarpRestModel {
         this.setProperties(payload);
       }
       res.target = this;
+      await applyModelCallbacks(modelName, "afterUpdate", this, res);
       return res;
     });
   }
 
-  destroyRecord() {
-    return this.store.destroyRecord(this.__type, this);
+  async destroyRecord() {
+    const modelName = this.constructor.type;
+    applyModelCallbacks(modelName, "beforeDestroy", this);
+    const res = await this.store.destroyRecord(this.__type, this);
+    await applyModelCallbacks(modelName, "afterDestroy", this);
+    return res;
+  }
+
+  // `WarpRestModel#destroy` (builder-driven delete), wrapped with callbacks.
+  async destroy() {
+    const modelName = this.constructor.type;
+    applyModelCallbacks(modelName, "beforeDestroy", this);
+    await super.destroy();
+    await applyModelCallbacks(modelName, "afterDestroy", this);
   }
 
   async #withSaving(fn) {
