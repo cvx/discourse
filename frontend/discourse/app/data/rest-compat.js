@@ -5,7 +5,6 @@ import {
   applyModelCallbacks,
   applyRegisteredFields,
   extraSavePropertiesFor,
-  modelNameFor,
 } from "discourse/lib/model-extensions";
 
 // Bridges Discourse's legacy `Store` + `RestModel` callsites to WarpRestModel.
@@ -142,7 +141,7 @@ export default class RestCompatModel extends WarpRestModel {
     const creating = this.isNew;
     const props = this.#withSaveProperties(data);
 
-    applyModelCallbacks(
+    await applyModelCallbacks(
       modelName,
       creating ? "beforeCreate" : "beforeUpdate",
       this,
@@ -169,7 +168,7 @@ export default class RestCompatModel extends WarpRestModel {
     props = this.#withSaveProperties(props);
     const modelName = this.constructor.type;
     return this.#withSaving(async () => {
-      applyModelCallbacks(modelName, "beforeCreate", this, props);
+      await applyModelCallbacks(modelName, "beforeCreate", this, props);
       const adapter = this.store.adapterFor(this.__type);
       const res = await adapter.createRecord(this.store, this.__type, props);
       if (res.payload) {
@@ -186,7 +185,7 @@ export default class RestCompatModel extends WarpRestModel {
     props = this.#withSaveProperties(props);
     const modelName = this.constructor.type;
     return this.#withSaving(async () => {
-      applyModelCallbacks(modelName, "beforeUpdate", this, props);
+      await applyModelCallbacks(modelName, "beforeUpdate", this, props);
       const res = await this.store.update(
         this.__type,
         this[this.primaryKey],
@@ -204,7 +203,7 @@ export default class RestCompatModel extends WarpRestModel {
 
   async destroyRecord() {
     const modelName = this.constructor.type;
-    applyModelCallbacks(modelName, "beforeDestroy", this);
+    await applyModelCallbacks(modelName, "beforeDestroy", this);
     const res = await this.store.destroyRecord(this.__type, this);
     await applyModelCallbacks(modelName, "afterDestroy", this);
     return res;
@@ -213,14 +212,14 @@ export default class RestCompatModel extends WarpRestModel {
   // `WarpRestModel#destroy` (builder-driven delete), wrapped with callbacks.
   async destroy() {
     const modelName = this.constructor.type;
-    applyModelCallbacks(modelName, "beforeDestroy", this);
+    await applyModelCallbacks(modelName, "beforeDestroy", this);
     await super.destroy();
     await applyModelCallbacks(modelName, "afterDestroy", this);
   }
 
   async #withSaving(fn) {
     if (this.isSaving) {
-      return Promise.reject();
+      return Promise.reject(new Error("model is already saving"));
     }
     this.isSaving = true;
     try {
