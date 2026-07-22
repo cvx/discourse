@@ -152,9 +152,6 @@ export default class TopicFromParams extends DiscourseRoute {
     const topic = this.modelFor("topic");
     const postStream = topic.postStream;
 
-    // TODO we are seeing errors where closest post is null and this is exploding
-    // we need better handling and logging for this condition.
-
     // there are no closestPost for hidden topics
     if (topic.view_hidden) {
       return;
@@ -164,6 +161,12 @@ export default class TopicFromParams extends DiscourseRoute {
     const closestPost = postStream.closestPostForPostNumber(
       params.nearPost || 1
     );
+
+    // an empty stream means the topic view could not be loaded
+    if (!closestPost) {
+      return;
+    }
+
     const closest = closestPost.post_number;
 
     topicController.setProperties({
@@ -196,7 +199,7 @@ export default class TopicFromParams extends DiscourseRoute {
 
     // completely clear out all the bookmark related attributes
     // because they are not in the response if bookmarked == false
-    if (closestPost && !closestPost.bookmarked) {
+    if (!closestPost.bookmarked) {
       closestPost.clearBookmark();
     }
 
