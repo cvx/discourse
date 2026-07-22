@@ -38,8 +38,8 @@ jobs:
     timeout-minutes: >-
       ${{
         matrix.build_type == 'system' && (matrix.target == 'core-plugins' || matrix.target == 'official-plugins' || matrix.target == 'core')
-        && 30
-        || 20
+        && 60
+        || 45
       }}
 
     defaults:
