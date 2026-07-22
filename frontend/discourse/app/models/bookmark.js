@@ -41,6 +41,10 @@ export default class Bookmark extends RestCompatModel {
   // stashed on the wrapper as an own property (survives `_adoptResource` and
   // isn't part of the schema).
   static create(args = {}) {
+    if (args instanceof Bookmark) {
+      return args;
+    }
+
     const { user, currentUser, ...rest } = args;
     const wrapper = super.create({ ...rest, user: User.create(user) });
     wrapper.currentUser = currentUser || User.current();
@@ -149,9 +153,7 @@ export default class Bookmark extends RestCompatModel {
   }
 
   get visibleListTags() {
-    const siteSettings = getOwnerWithFallback().lookup(
-      "service:site-settings"
-    );
+    const siteSettings = getOwnerWithFallback().lookup("service:site-settings");
     if (!this.tags || !siteSettings.suppress_overlapping_tags_in_list) {
       return this.tags;
     }

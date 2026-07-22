@@ -90,6 +90,7 @@ export default class TopicDetails extends RestCompatModel {
     }
     const store = warpStoreFor(this.constructor);
     store.push(normalizeTopicDetailsPayload({ topicId: id, details: wrapped }));
+    this._applyExtraAttributes(id);
     this.loaded = true;
   }
 

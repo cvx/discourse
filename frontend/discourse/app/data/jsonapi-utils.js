@@ -1,6 +1,19 @@
-export function pickSchemaAttributes(raw, schema) {
+import { recordExtraAttributes } from "discourse/data/extra-attributes";
+
+// Keeps the schema-declared attributes of `raw`. Pass `identity` to retain the
+// remaining keys as extra attributes for that resource rather than dropping
+// them — see `extra-attributes.js`.
+export function pickSchemaAttributes(raw, schema, identity) {
   const out = {};
+  const declared = new Set();
+
+  if (schema.identity?.name) {
+    declared.add(schema.identity.name);
+  }
+
   for (const field of schema.fields ?? []) {
+    declared.add(field.name);
+
     if (field.kind !== "attribute") {
       continue;
     }
@@ -8,6 +21,17 @@ export function pickSchemaAttributes(raw, schema) {
       out[field.name] = raw[field.name];
     }
   }
+
+  if (identity) {
+    const extras = {};
+    for (const [name, value] of Object.entries(raw)) {
+      if (!declared.has(name)) {
+        extras[name] = value;
+      }
+    }
+    recordExtraAttributes(identity.type, identity.id, extras);
+  }
+
   return out;
 }
 

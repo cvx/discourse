@@ -1,3 +1,7 @@
+import {
+  exposeExtraAttributes,
+  extraAttributesFor,
+} from "discourse/data/extra-attributes";
 import { getOwnerWithFallback } from "discourse/lib/get-owner";
 
 export function warpStoreFor(klass) {
@@ -43,10 +47,27 @@ export default class WarpRestModel {
 
   constructor(resource) {
     this.#resource = resource;
+    this._applyExtraAttributes(resource?.id);
   }
 
   get __resource() {
     return this.#resource;
+  }
+
+  // Attributes the schema doesn't declare never reach the cache; re-attach the
+  // ones normalization retained for this identity. Called on construction and
+  // whenever the wrapper adopts a cached record — subclasses with their own
+  // ingest path (`TopicDetails`) call it after pushing.
+  _applyExtraAttributes(id) {
+    const { type } = this.constructor;
+    if (type == null || id == null) {
+      return;
+    }
+
+    const extras = extraAttributesFor(type, String(id));
+    if (extras) {
+      exposeExtraAttributes(this, extras);
+    }
   }
 
   // Swap `__resource` to the cached record for `id`. Subclasses can define
@@ -64,6 +85,7 @@ export default class WarpRestModel {
       this.#resource = cached;
       this._didReplaceResource?.();
     }
+    this._applyExtraAttributes(id);
   }
 
   updateFromJson(json) {

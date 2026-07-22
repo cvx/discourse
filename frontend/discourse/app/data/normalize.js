@@ -11,6 +11,7 @@ import { UserBadgeSchema } from "discourse/data/schemas/user-badge";
 import { i18n } from "discourse-i18n";
 
 function badgeResource(raw, includedIds) {
+  const id = String(raw.id);
   const relationships = {};
   maybeRelate(
     relationships,
@@ -28,22 +29,30 @@ function badgeResource(raw, includedIds) {
   );
   return {
     type: "badge",
-    id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, BadgeSchema),
+    id,
+    attributes: pickSchemaAttributes(raw, BadgeSchema, { type: "badge", id }),
     relationships,
   };
 }
 
 function badgeTypeResource(raw) {
+  const id = String(raw.id);
   return {
     type: "badge-type",
-    id: String(raw.id),
-    attributes: pickSchemaAttributes(raw, BadgeTypeSchema),
+    id,
+    attributes: pickSchemaAttributes(raw, BadgeTypeSchema, {
+      type: "badge-type",
+      id,
+    }),
   };
 }
 
 function badgeGroupingResource(raw) {
-  const attributes = pickSchemaAttributes(raw, BadgeGroupingSchema);
+  const id = String(raw.id);
+  const attributes = pickSchemaAttributes(raw, BadgeGroupingSchema, {
+    type: "badge-grouping",
+    id,
+  });
   if (raw.name) {
     const i18nNameKey = raw.name.toLowerCase().replace(/\s/g, "_");
     attributes.displayName = i18n(`badges.badge_grouping.${i18nNameKey}.name`, {
@@ -52,13 +61,17 @@ function badgeGroupingResource(raw) {
   }
   return {
     type: "badge-grouping",
-    id: String(raw.id),
+    id,
     attributes,
   };
 }
 
 function userBadgeResource(raw, lookup, includedIds) {
-  const attributes = pickSchemaAttributes(raw, UserBadgeSchema);
+  const id = String(raw.id);
+  const attributes = pickSchemaAttributes(raw, UserBadgeSchema, {
+    type: "user-badge",
+    id,
+  });
   // Inline sideloads as plain objects so templates can read arbitrary fields
   // without hitting LegacyMode's strict schema check on cached records.
   if (raw.user_id != null) {
@@ -75,7 +88,7 @@ function userBadgeResource(raw, lookup, includedIds) {
   maybeRelate(relationships, "badge", includedIds, "badge", raw.badge_id);
   return {
     type: "user-badge",
-    id: String(raw.id),
+    id,
     attributes,
     relationships,
   };
@@ -174,11 +187,15 @@ export function normalizeUserBadgesPayload(payload) {
 }
 
 export function normalizeTopicDetailsPayload({ topicId, details }) {
+  const id = String(topicId);
   return {
     data: {
       type: "topic-details",
-      id: String(topicId),
-      attributes: pickSchemaAttributes(details, TopicDetailsSchema),
+      id,
+      attributes: pickSchemaAttributes(details, TopicDetailsSchema, {
+        type: "topic-details",
+        id,
+      }),
     },
   };
 }
