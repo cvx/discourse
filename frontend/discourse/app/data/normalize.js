@@ -106,8 +106,10 @@ function collectBadgeMetaIncluded(payload, included) {
 // Accepts:
 //   { badge: {...},  badge_types: [...], badge_groupings?: [...] }   (show)
 //   { badges: [...], badge_types: [...], badge_groupings: [...] }    (index)
-// Empty / unrecognized payloads return `{ data: null }` (no `included` —
-// JSON:API forbids it when data is null).
+// A payload carrying neither is an empty collection, not an absent record:
+// badges ride along in larger payloads (a user summary, a post) that may
+// simply have none, and callers there expect a list. Only a missing payload
+// is `{ data: null }` (no `included` — JSON:API forbids it when data is null).
 export function normalizeBadgesPayload(payload) {
   if (!payload) {
     return { data: null };
@@ -119,13 +121,10 @@ export function normalizeBadgesPayload(payload) {
   if (payload.badge) {
     return { data: badgeResource(payload.badge, includedIds), included };
   }
-  if (payload.badges) {
-    return {
-      data: payload.badges.map((raw) => badgeResource(raw, includedIds)),
-      included,
-    };
-  }
-  return { data: null };
+  return {
+    data: (payload.badges ?? []).map((raw) => badgeResource(raw, includedIds)),
+    included,
+  };
 }
 
 // Accepts:
