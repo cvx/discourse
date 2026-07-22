@@ -10,6 +10,7 @@ import {
 } from "discourse/lib/model-extensions";
 import { withPluginApi } from "discourse/lib/plugin-api";
 import { isTrackedArray } from "discourse/lib/tracked-tools";
+import Badge from "discourse/models/badge";
 import pretender, {
   parsePostData,
   response,
@@ -331,5 +332,27 @@ module("Unit | Lib | model-extensions (WarpDrive)", function (hooks) {
 
     assert.verifySteps(["changed"], "a classic observer fires on change");
     assert.strictEqual(record.doubled, 10);
+  });
+
+  test("addModelField applies to records loaded from the server", async function (assert) {
+    withPluginApi((api) =>
+      api.addModelField("badge", "rank", { defaultValue: 5 })
+    );
+
+    pretender.get("/badges.json", () =>
+      response({
+        badges: [{ id: 1, name: "a", badge_type_id: 1 }],
+        badge_types: [{ id: 1, name: "Gold" }],
+        badge_groupings: [],
+      })
+    );
+
+    const badges = await Badge.findAll();
+    assert.strictEqual(badges.length, 1, "loads the badge");
+    assert.strictEqual(
+      badges[0].rank,
+      5,
+      "reads the registered field off a cached record"
+    );
   });
 });

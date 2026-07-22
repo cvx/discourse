@@ -8,6 +8,11 @@ import {
   extraSavePropertiesFor,
 } from "discourse/lib/model-extensions";
 
+// Attrs bags handed to `create`, as opposed to cached records. Tracked by
+// identity because the two are indistinguishable by shape, and reading an
+// undeclared field off a cached record throws rather than returning undefined.
+const draftResources = new WeakSet();
+
 // Bridges Discourse's legacy `Store` + `RestModel` callsites to WarpRestModel.
 // Drop this layer (extend WarpRestModel directly) once a model's callers no
 // longer use `.get` / `.set` / `.setProperties` / `store.createRecord` /
@@ -32,6 +37,7 @@ export default class RestCompatModel extends WarpRestModel {
     }
 
     const resource = trackedObject({ ...attrs });
+    draftResources.add(resource);
     const wrapper = new this(resource);
     wrapper.__isLocalDraft = true;
     wrapper.store = attrs.store;
@@ -66,14 +72,25 @@ export default class RestCompatModel extends WarpRestModel {
 
     // Defines plugin-registered fields (see `addModelField`) as tracked
     // properties on the wrapper. Plugin fields are outside the schema, so they
-    // live here rather than in the cache. A caller/server-provided value wins
-    // over the registered default: from the raw attrs for a draft, else from
-    // the wrapper, which the base constructor has already given accessors for
-    // any retained extra attributes. Existence is probed by reading rather than
-    // `in`: the `has` trap on a `trackedObject` draft is unreliable, and an
-    // explicit `undefined` is equivalent to omission here.
+    // live here rather than in the cache, and a caller/server-provided value
+    // wins over the registered default.
+    //
+    // Only a draft's attrs bag can be probed directly — it holds whatever the
+    // caller passed. A cached record throws on any field its schema doesn't
+    // declare, which is every plugin field, so go through the wrapper, where
+    // the base constructor has already exposed the retained extras. Existence
+    // is probed by reading rather than `in`: the `has` trap on a `trackedObject`
+    // draft is unreliable, and an explicit `undefined` means omission here.
+    //
+    // Keep the `__resource` read inside the callback. Subclasses override that
+    // getter (`TopicDetails` reaches for a private field), and during `super()`
+    // their own fields aren't initialized yet — so with no registered fields the
+    // callback never runs and the getter is never touched.
     applyRegisteredFields(this, (name) => {
-      const value = this.__resource?.[name] ?? this[name];
+      const resource = this.__resource;
+      const value = draftResources.has(resource)
+        ? resource?.[name]
+        : this[name];
       if (value !== undefined) {
         return { value };
       }
