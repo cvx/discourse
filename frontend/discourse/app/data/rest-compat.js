@@ -34,6 +34,9 @@ export default class RestCompatModel extends WarpRestModel {
     const resource = trackedObject({ ...attrs });
     const wrapper = new this(resource);
     wrapper.__isLocalDraft = true;
+    wrapper.store = attrs.store;
+    wrapper.__type = attrs.__type;
+    wrapper.__state = attrs.__state;
     // Legacy `create(json)` took arbitrary keys; only schema fields have
     // prototype forwarders, so expose the rest straight off the draft.
     exposeExtraAttributes(wrapper, resource);
@@ -45,9 +48,17 @@ export default class RestCompatModel extends WarpRestModel {
   // Subclasses override (e.g. `TagNotification` uses `"name"`).
   primaryKey = "id";
 
+  // `Store._build` stamps these onto the raw attrs. They are legacy bookkeeping
+  // rather than schema fields, so — as in `RestModel` — they belong to the
+  // wrapper. Reading them back through `__resource` works only while it is the
+  // draft attrs bag: once the wrapper adopts a cached record, LegacyMode throws
+  // on every field the schema doesn't declare, and `save()` reads `isNew`.
+  store;
+  __type;
+  @tracked __state;
+
   // True until `save()` / `updateFromJson()` swaps in the cached record. The
-  // flag lives on the wrapper because cached LegacyMode records reject any
-  // field not declared in their schema.
+  // flag lives on the wrapper for the same reason.
   __isLocalDraft = false;
 
   constructor() {
@@ -75,28 +86,6 @@ export default class RestCompatModel extends WarpRestModel {
 
   _didReplaceResource() {
     this.__isLocalDraft = false;
-  }
-
-  // `store`, `__type`, `__state` are stamped onto the raw attrs by
-  // `Store._build` and land in the trackedObject; the wrapper needs explicit
-  // accessors to reach them back out.
-
-  get store() {
-    return this.__resource?.store;
-  }
-
-  get __type() {
-    return this.__resource?.__type;
-  }
-
-  get __state() {
-    return this.__resource?.__state;
-  }
-
-  set __state(value) {
-    if (this.__resource) {
-      this.__resource.__state = value;
-    }
   }
 
   get isNew() {
