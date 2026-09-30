@@ -6,6 +6,7 @@ import { service } from "@ember/service";
 import { trustHTML } from "@ember/template";
 import IpLookupAccountsTable from "discourse/admin/components/ip-lookup-accounts-table";
 import AdminUser from "discourse/admin/models/admin-user";
+import AdminMcp from "discourse/admin/components/admin-mcp";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import DButton from "discourse/ui-kit/d-button";
@@ -236,3 +237,5 @@ const OtherAccountsModal = <template>
     </:footer>
   </DModal>
 </template>;
+
+export const adminMcpForTest = AdminMcp;
