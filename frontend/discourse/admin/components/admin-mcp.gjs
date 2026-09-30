@@ -1,8 +1,4 @@
 import Component from "@glimmer/component";
-
-export async function loadExtras() {
-  return await Promise.all([import("rrule"), import("diff")]);
-}
 import { tracked } from "@glimmer/tracking";
 import { array, concat, fn } from "@ember/helper";
 import { on } from "@ember/modifier";
