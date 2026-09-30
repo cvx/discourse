@@ -47,7 +47,7 @@ jobs:
       # workflow B still runs for PRs without JS changes, to resolve an old comment.
       - name: Report no JS changes
         if: steps.changes.outputs.js == 'false'
-        run: node script/bundle_analysis/analyze.mjs --no-js-changes --out "$RUNNER_TEMP/artifact"
+        run: node script/bundle_analysis/analyze.mjs --no-js-changes --out "$RUNNER_TEMP/analysis"
 
       - name: Record the PR
         if: steps.changes.outputs.js == 'false'
@@ -84,8 +84,8 @@ jobs:
 
       - name: Analyze
         run: |
-          node script/bundle_analysis/analyze.mjs --base "$RUNNER_TEMP/base" --head frontend/discourse/dist --out "$RUNNER_TEMP/artifact"
-          cat "$RUNNER_TEMP/artifact/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          node script/bundle_analysis/analyze.mjs --base "$RUNNER_TEMP/base" --head frontend/discourse/dist --out "$RUNNER_TEMP/analysis"
+          cat "$RUNNER_TEMP/analysis/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record the PR
         uses: ./.github/actions/bundle-analysis-artifact
