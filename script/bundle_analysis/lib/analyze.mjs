@@ -37,10 +37,12 @@ export async function analyze({ baseDir, headDir, mainEntry = MAIN_ENTRY }) {
     const b = base.bundles.get(key);
     const h = head.bundles.get(key);
     const measure = (bundle, sizes) =>
-      bundle && {
-        own: sizes.get(bundle.file).brotli,
-        load: sum(bundle.costChunks, sizes),
-      };
+      bundle
+        ? {
+            own: sizes.get(bundle.file).brotli,
+            load: sum(bundle.costChunks, sizes),
+          }
+        : null;
     bundles.push({
       key,
       name: (h ?? b).name,
