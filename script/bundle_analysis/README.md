@@ -46,3 +46,5 @@ Baselines are exact because the build is reproducible: a weekly job (`reproducib
 - `lib/baseline.mjs`: finds or builds a baseline.
 
 Tests: `node --test "script/bundle_analysis/test/*.test.mjs"`
+
+Bundle analysis test: a change without JS.
