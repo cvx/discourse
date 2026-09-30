@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { basename, relative } from "path";
 import { viteAliasPlugin, viteImportGlobPlugin } from "rolldown/experimental";
+import bundleGraphPlugin from "./lib/bundle-graph-plugin.mjs";
 import discourseChunkNamesPlugin from "./lib/discourse-chunk-names.mjs";
 import discourseSourceImports from "./lib/discourse-source-imports.mjs";
 import dynamicChunkUrlPlugin from "./lib/dynamic-chunk-url-plugin.mjs";
@@ -179,6 +180,9 @@ export function buildConfig({ devMode } = {}) {
           }
         },
       },
+      ...(isProduction
+        ? [bundleGraphPlugin({ root: import.meta.dirname })]
+        : []),
       {
         name: "bundle-manifest",
         generateBundle(_outputOptions, bundle) {
