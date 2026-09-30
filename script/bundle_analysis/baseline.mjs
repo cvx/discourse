@@ -3,22 +3,31 @@
 import { execFileSync } from "child_process";
 import { resolve } from "path";
 import { parseArgs } from "util";
-import { findBaseline } from "./lib/baseline.mjs";
+import { findBaseline, sameJsInputs } from "./lib/baseline.mjs";
+
+const USAGE = `Usage:
+  node script/bundle_analysis/baseline.mjs --commit <sha> --out <dir>
+  node script/bundle_analysis/baseline.mjs --js-changed-since <sha>   (prints true or false)`;
 
 const { values: args } = parseArgs({
-  options: { commit: { type: "string" }, out: { type: "string" } },
+  options: {
+    commit: { type: "string" },
+    out: { type: "string" },
+    "js-changed-since": { type: "string" },
+  },
 });
-if (!args.commit || !args.out) {
-  console.error(
-    "Usage: node script/bundle_analysis/baseline.mjs --commit <sha> --out <dir>"
-  );
+
+const revParse = (ref) =>
+  execFileSync("git", ["rev-parse", ref], { encoding: "utf8" }).trim();
+
+if (args["js-changed-since"]) {
+  console.log(!sameJsInputs(revParse(args["js-changed-since"]), "HEAD"));
+} else if (args.commit && args.out) {
+  const result = findBaseline(revParse(args.commit), resolve(args.out), {
+    log: (message) => console.error(message),
+  });
+  console.log(JSON.stringify(result));
+} else {
+  console.error(USAGE);
   process.exit(1);
 }
-
-const commit = execFileSync("git", ["rev-parse", args.commit], {
-  encoding: "utf8",
-}).trim();
-const result = findBaseline(commit, resolve(args.out), {
-  log: (message) => console.error(message),
-});
-console.log(JSON.stringify(result));

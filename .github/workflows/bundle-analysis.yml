@@ -20,8 +20,42 @@ permissions:
   contents: read
 
 jobs:
-  analyze:
+  changes:
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      js: ${{ steps.changes.outputs.js }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Analyzer tests
+        run: node --test "script/bundle_analysis/test/*.test.mjs"
+
+      - name: Check for JS changes
+        id: changes
+        run: echo "js=$(node script/bundle_analysis/baseline.mjs --js-changed-since HEAD^1)" >> "$GITHUB_OUTPUT"
+
+      # workflow B still runs for PRs without JS changes, to resolve an old comment.
+      - name: Report no JS changes
+        if: steps.changes.outputs.js == 'false'
+        run: node script/bundle_analysis/analyze.mjs --no-js-changes --out "$RUNNER_TEMP/artifact"
+
+      - name: Record the PR
+        if: steps.changes.outputs.js == 'false'
+        uses: ./.github/actions/bundle-analysis-artifact
+
+  analyze:
+    needs: changes
+    if: needs.changes.outputs.js == 'true'
     runs-on: ${{ (github.repository_owner == 'discourse' && 'cdck-linux-8-core') || 'ubuntu-latest' }}
     container: discourse/discourse_test:release
     timeout-minutes: 20
@@ -35,26 +69,10 @@ jobs:
           fetch-depth: 50
           persist-credentials: false
 
-      - name: Analyzer tests
-        run: node --test "script/bundle_analysis/test/*.test.mjs"
-
-      - name: Check for JS changes
-        id: changes
-        run: |
-          base=$(git rev-parse HEAD^1)
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          if git diff --quiet "$base" HEAD -- frontend package.json pnpm-lock.yaml pnpm-workspace.yaml patches .pnpmfile.cjs .npmrc; then
-            echo "js=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "js=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: pnpm install
-        if: steps.changes.outputs.js == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build the PR
-        if: steps.changes.outputs.js == 'true'
         working-directory: frontend/discourse
         env:
           EMBER_ENV: production
@@ -62,43 +80,15 @@ jobs:
         run: pnpm build
 
       - name: Find the baseline
-        if: steps.changes.outputs.js == 'true'
-        env:
-          BASE: ${{ steps.changes.outputs.base }}
-        run: node script/bundle_analysis/baseline.mjs --commit "$BASE" --out "$RUNNER_TEMP/base"
+        run: node script/bundle_analysis/baseline.mjs --commit HEAD^1 --out "$RUNNER_TEMP/base"
 
       - name: Analyze
-        env:
-          JS_CHANGED: ${{ steps.changes.outputs.js }}
         run: |
-          out="$RUNNER_TEMP/bundle-analysis"
-          if [ "$JS_CHANGED" = "true" ]; then
-            node script/bundle_analysis/analyze.mjs --base "$RUNNER_TEMP/base" --head frontend/discourse/dist --out "$out"
-          else
-            node script/bundle_analysis/analyze.mjs --no-js-changes --out "$out"
-          fi
-          cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
-          mkdir -p "$RUNNER_TEMP/artifact"
-          mv "$out/report.json" "$RUNNER_TEMP/artifact/report.json"
+          node script/bundle_analysis/analyze.mjs --base "$RUNNER_TEMP/base" --head frontend/discourse/dist --out "$RUNNER_TEMP/artifact"
+          cat "$RUNNER_TEMP/artifact/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record the PR
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-        run: >
-          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({
-            number: Number(process.env.PR_NUMBER),
-            head_sha: process.env.HEAD_SHA,
-            head_repo: process.env.HEAD_REPO,
-          }))' "$RUNNER_TEMP/artifact/pr.json"
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: bundle-analysis
-          path: ${{ runner.temp }}/artifact
-          retention-days: 7
-          if-no-files-found: error
+        uses: ./.github/actions/bundle-analysis-artifact
 
   reproducibility:
     if: github.event_name != 'pull_request'

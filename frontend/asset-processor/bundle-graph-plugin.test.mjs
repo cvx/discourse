@@ -134,10 +134,7 @@ test("records entries, lazy chunks and their connections", async () => {
   expect(main.examples[`dynamic:${lazy.file}`]).toEqual([
     { from: "main.js", to: "lazy.js" },
   ]);
-  expect(graph.lazyTargets["lazy.js"]).toEqual({
-    staticImporters: [],
-    dynamicImporters: ["main.js"],
-  });
+  expect(graph.lazyTargets["lazy.js"]).toEqual({ staticImporters: [] });
 });
 
 test("records a dynamic import that rolldown merged into its importer", async () => {
@@ -148,7 +145,6 @@ test("records a dynamic import that rolldown merged into its importer", async ()
   expect(main.dynamicImports).not.toContain(main.file);
   expect(graph.lazyTargets["merged.js"]).toEqual({
     staticImporters: ["main.js"],
-    dynamicImporters: ["main.js"],
   });
 });
 
