@@ -1,4 +1,5 @@
 import { waitForPromise } from "@ember/test-waiters";
+import PhotoSwipe from "photoswipe";
 import { isRailsTesting, isTesting } from "discourse/lib/environment";
 import { helperContext } from "discourse/lib/helpers";
 import { SELECTORS } from "discourse/lib/lightbox/constants";
@@ -106,10 +107,7 @@ async function initLightbox(elem, additionalData = {}) {
     escKey: false,
     tapAction,
     paddingFn,
-    pswpModule: async () =>
-      await waitForPromise(
-        import(/* dynamicChunkName: "photoswipe" */ "photoswipe")
-      ),
+    pswpModule: PhotoSwipe,
     appendToEl: isTesting() && document.getElementById("ember-testing"),
   });
 
