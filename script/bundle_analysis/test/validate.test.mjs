@@ -17,6 +17,28 @@ test("accepts what the analyzer writes", async () => {
   );
 });
 
+test("accepts reports with new and removed bundles", async () => {
+  const head = baseApp();
+  delete head.chunks["assets/js/codemirror-dddd4444.digested.js"];
+  head.chunks["assets/js/admin-cccc3333.digested.js"].dynamicImports = [
+    "assets/js/rrule-eeee5555.digested.js",
+  ];
+  head.chunks["assets/js/rrule-eeee5555.digested.js"] = {
+    kind: "lazy",
+    facade: "rrule@2.8.1/dist/esm/index.js",
+    modules: { "rrule@2.8.1/dist/esm/index.js": 8000 },
+  };
+  const report = JSON.parse(
+    JSON.stringify(
+      await analyze({ baseDir: makeDist(baseApp()), headDir: makeDist(head) })
+    )
+  );
+
+  const statuses = report.bundles.map((bundle) => bundle.status).sort();
+  assert.deepEqual(statuses, ["new", "removed", "same", "same"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(validateReport(report))), report);
+});
+
 test("rejects wrong types and unknown schemas", async () => {
   const report = JSON.parse(
     JSON.stringify(
