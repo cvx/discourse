@@ -160,7 +160,7 @@ test("run creates, updates and resolves one comment", async () => {
     });
 
   assert.equal((await go(FINDINGS_REPORT)).type, "create");
-  assert.match(github.comments[0].body, /Initial load grew/);
+  assert.match(github.comments[0].body, /Grew over the threshold/);
   assert.match(github.comments[0].body, /state=active/);
 
   assert.equal((await go(FINDINGS_REPORT)).type, "update");

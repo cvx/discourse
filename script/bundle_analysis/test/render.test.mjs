@@ -112,7 +112,7 @@ test("edges that share a target are grouped", () => {
   );
 
   assert.equal(keys.length, 2);
-  assert.ok(body.includes("- `a`, `b` → `x`: dynamic"));
+  assert.ok(body.includes("| `a`, `b` | `x` | dynamic | – |"));
 });
 
 test("the summary renders a no-changes report", () => {
