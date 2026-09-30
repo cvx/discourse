@@ -122,6 +122,10 @@ test("tryDownload checks the tree hash and the bundle graph", () => {
     tryDownload("file:///does/not/exist.tar.gz", out(), hash),
     false
   );
+
+  const junk = join(mkdtempSync(join(tmpdir(), "bundle-junk-")), "junk.tar.gz");
+  writeFileSync(junk, "not a tarball");
+  assert.equal(tryDownload(`file://${junk}`, out(), hash), false);
 });
 
 test("findBaseline uses any recent commit with the same JS inputs, else builds", () => {

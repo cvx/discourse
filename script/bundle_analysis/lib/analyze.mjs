@@ -4,6 +4,7 @@ import {
   MAIN_ENTRY,
   moduleBytes,
   packageOf,
+  stripVersion,
   UNMAPPED,
 } from "./graph.mjs";
 import { brotliSizes } from "./sizes.mjs";
@@ -181,8 +182,13 @@ function importersOf(key, build) {
  */
 function movedIntoInitialLoad(base, head) {
   const groups = new Map();
+  const owners = new Map();
   for (const [id, headFile] of head.moduleChunk) {
-    const baseFile = base.moduleChunk.get(id);
+    // Version-less, so code that moves in the PR that bumps its package
+    // is still found.
+    const baseFile =
+      base.moduleChunk.get(id) ??
+      base.strippedModuleChunk.get(stripVersion(id));
     if (
       !baseFile ||
       base.initial.has(baseFile) ||
@@ -190,7 +196,10 @@ function movedIntoInitialLoad(base, head) {
     ) {
       continue;
     }
-    const owner = ownerBundle(base, baseFile);
+    if (!owners.has(baseFile)) {
+      owners.set(baseFile, ownerBundle(base, baseFile));
+    }
+    const owner = owners.get(baseFile);
     if (!owner) {
       continue;
     }

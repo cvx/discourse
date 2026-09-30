@@ -196,6 +196,9 @@ test("labelOf strips the content hash", () => {
     "route-wizard-js"
   );
   expect(labelOf("assets/js/jxl_enc-gne50clb.digested.wasm")).toBe("jxl_enc");
+  expect(labelOf("@embroider/virtual/test-support.css")).toBe(
+    "test-support.css"
+  );
 });
 
 test("normalizeModuleId drops machine-specific paths", () => {

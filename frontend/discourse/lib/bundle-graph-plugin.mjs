@@ -141,12 +141,13 @@ export default function bundleGraphPlugin({ root }) {
 
 /**
  * The filename part before the content hash, e.g. `admin` for
- * `assets/js/admin-gwfrhsfc.digested.js`. Follows the file name patterns in
- * rolldown.config.mjs.
+ * `assets/js/admin-gwfrhsfc.digested.js`. Files without a digested hash
+ * keep their whole name. Follows the output file name patterns in the build
+ * config.
  */
 export function labelOf(fileName) {
   const base = fileName.split("/").pop();
-  return base.replace(/-[a-z0-9]+(\.digested)?\.[a-z0-9]+$/, "");
+  return base.replace(/-[a-z0-9]+\.digested\.[a-z0-9]+$/, "");
 }
 
 /**
@@ -301,16 +302,48 @@ function moduleBytes(chunk, fileName, outDir, normalize) {
   }
 
   const mapDir = resolve(outDir, dirname(fileName), map.sourceRoot ?? "");
+  let orphaned = 0;
   map.sources.forEach((source, i) => {
-    if (totals[i] > 0) {
-      const key = source ? normalize(resolve(mapDir, source)) : UNMAPPED;
-      bytes[key] = (bytes[key] ?? 0) + totals[i];
+    const key = source ? normalize(resolve(mapDir, source)) : UNMAPPED;
+    if (totals[i] > 0 && Object.hasOwn(bytes, key)) {
+      bytes[key] += totals[i];
+    } else {
+      orphaned += totals[i];
     }
   });
-  if (totals[unmapped] > 0) {
-    bytes[UNMAPPED] = (bytes[UNMAPPED] ?? 0) + totals[unmapped];
+  bytes[UNMAPPED] = totals[unmapped];
+  shareOrphanedBytes(bytes, chunk, normalize, orphaned);
+  if (bytes[UNMAPPED] === 0) {
+    delete bytes[UNMAPPED];
   }
   return bytes;
+}
+
+/**
+ * A dependency that ships its own source map leaves sources in the chunk map
+ * that are not module ids (its original `../src/*.ts` files), and its module
+ * gets no mapped bytes. Those bytes go to the chunk's modules that got none,
+ * in proportion to their rendered length.
+ */
+function shareOrphanedBytes(bytes, chunk, normalize, orphaned) {
+  if (orphaned === 0) {
+    return;
+  }
+  const receivers = chunk.moduleIds
+    .map((id) => [normalize(id), chunk.modules[id]?.renderedLength ?? 0])
+    .filter(([key, length]) => bytes[key] === 0 && length > 0);
+  const totalLength = receivers.reduce((sum, [, length]) => sum + length, 0);
+  if (totalLength === 0) {
+    bytes[UNMAPPED] += orphaned;
+    return;
+  }
+  let given = 0;
+  for (const [key, length] of receivers) {
+    const share = Math.floor((orphaned * length) / totalLength);
+    bytes[key] += share;
+    given += share;
+  }
+  bytes[receivers[0][0]] += orphaned - given;
 }
 
 /**

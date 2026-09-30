@@ -11,8 +11,8 @@ It is informational only and never fails a PR.
 
 ## Terms
 
-- **Bundle:** an entry (`discourse`, the media worker) or a lazy `import()` target (`admin`, `codemirror-editor`, …).
-- **Shared chunk:** a rolldown chunk that dedupes code between bundles. Never reported on its own; its bytes count toward every bundle that loads it.
+- **Bundle:** an entry (`discourse`, the media worker) or a lazy `import()` target (`admin`, the code editor, …).
+- **Shared chunk:** an output chunk that dedupes code between bundles. Never reported on its own; its bytes count toward every bundle that loads it.
 - **Initial load:** the `discourse` entry plus everything it imports statically.
 - **Load cost:** a bundle plus what it loads beyond the initial load.
 

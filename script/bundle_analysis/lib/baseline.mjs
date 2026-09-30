@@ -9,7 +9,7 @@ import {
   rmSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { GRAPH_PATH } from "./graph.mjs";
 
 /** Everything that can change the core JS build. */
@@ -76,7 +76,10 @@ export function tryDownload(
   expectedTreeHash,
   { log = () => {}, requireGraph = true } = {}
 ) {
-  const work = mkdtempSync(join(tmpdir(), "bundle-baseline-"));
+  // Next to outDir, so the final rename stays on one filesystem: in CI the
+  // system temp dir and the output dir are different mounts.
+  mkdirSync(dirname(outDir), { recursive: true });
+  const work = mkdtempSync(join(dirname(outDir), ".bundle-baseline-"));
   try {
     const tarball = join(work, "production.tar.gz");
     const curl = spawnSync(
@@ -98,10 +101,16 @@ export function tryDownload(
       log(`No published build at ${url}`);
       return false;
     }
-    execFileSync("tar", ["-xzf", tarball, "-C", work, "core"]);
-    const info = JSON.parse(
-      readFileSync(join(work, "core/BUILD_INFO.json"), "utf8")
-    );
+    let info;
+    try {
+      execFileSync("tar", ["-xzf", tarball, "-C", work, "core"]);
+      info = JSON.parse(
+        readFileSync(join(work, "core/BUILD_INFO.json"), "utf8")
+      );
+    } catch (error) {
+      log(`Published build at ${url} is unreadable: ${error.message}`);
+      return false;
+    }
     if (info.core_tree_hash !== expectedTreeHash) {
       log(`Published build at ${url} is from different JS inputs`);
       return false;

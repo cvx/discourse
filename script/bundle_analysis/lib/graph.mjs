@@ -5,7 +5,7 @@ export const GRAPH_PATH = "manifest/bundle-graph.json";
 export const MAIN_ENTRY = "discourse";
 export const UNMAPPED = "(unmapped)";
 
-// Labels rolldown derives from a module's basename that say nothing about
+// Labels the bundler derives from a module's basename that say nothing about
 // the bundle; such bundles are named after their facade instead.
 const GENERIC_LABELS = new Set([
   "browser",
@@ -96,7 +96,12 @@ export function describeBuild(graph, { mainEntry = MAIN_ENTRY } = {}) {
   }
 
   const lazyFiles = Object.keys(chunks)
-    .filter((file) => chunks[file].kind === "lazy" && !bundleOfChunk.has(file))
+    .filter(
+      (file) =>
+        chunks[file].kind === "lazy" &&
+        chunks[file].facade &&
+        !bundleOfChunk.has(file)
+    )
     .sort();
   const strippedCount = new Map();
   for (const file of lazyFiles) {
@@ -129,10 +134,12 @@ export function describeBuild(graph, { mainEntry = MAIN_ENTRY } = {}) {
   }
 
   const moduleChunk = new Map();
+  const strippedModuleChunk = new Map();
   for (const [file, chunk] of Object.entries(chunks)) {
     for (const id of Object.keys(chunk.modules)) {
       if (id !== UNMAPPED) {
         moduleChunk.set(id, file);
+        strippedModuleChunk.set(stripVersion(id), file);
       }
     }
   }
@@ -147,6 +154,7 @@ export function describeBuild(graph, { mainEntry = MAIN_ENTRY } = {}) {
   return {
     graph,
     importers,
+    strippedModuleChunk,
     mainKey: `entry:${mainEntry}`,
     initial,
     bundles,

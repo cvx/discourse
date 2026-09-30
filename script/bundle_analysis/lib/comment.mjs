@@ -5,7 +5,7 @@ import { renderComment } from "./render.mjs";
 import { validateReport } from "./validate.mjs";
 
 const MARKER =
-  /<!-- bundle-analysis:v1 state=(active|resolved|superseded) keys=([0-9a-f,]*) -->/;
+  /<!-- bundle-analysis:v1 state=(active|resolved|superseded) keys=([0-9a-f,]*) -->/g;
 const BOT_LOGIN = "github-actions[bot]";
 const ARTIFACT_FILES = { "report.json": 20 * 1024 * 1024, "pr.json": 1024 };
 
@@ -17,8 +17,12 @@ export function marker(state, keys) {
   return `<!-- bundle-analysis:v1 state=${state} keys=${[...new Set(keys.map(hashKey))].sort().join(",")} -->`;
 }
 
+/**
+ * The marker is always appended last. The body also holds strings from the
+ * untrusted report, which could imitate a marker, so only the last one counts.
+ */
 export function parseMarker(body) {
-  const match = body?.match(MARKER);
+  const match = [...(body ?? "").matchAll(MARKER)].at(-1);
   return match
     ? { state: match[1], keys: new Set(match[2].split(",").filter(Boolean)) }
     : null;

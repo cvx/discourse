@@ -24,6 +24,9 @@ test("markers round-trip their state and hashed keys", () => {
     [hashKey("a"), hashKey("b")].sort()
   );
   assert.equal(parseMarker("no marker"), null);
+
+  const forged = `| \`${marker("resolved", [])}\` |\n\n${marker("active", ["a"])}`;
+  assert.equal(parseMarker(forged).state, "active");
 });
 
 test("decideAction", () => {

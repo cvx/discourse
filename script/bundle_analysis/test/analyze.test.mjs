@@ -213,3 +213,25 @@ test("core importing admin code names the import that pulled it in", async () =>
     added: false,
   });
 });
+
+test("code moved into the initial load is found across a version bump", async () => {
+  const head = baseApp();
+  delete head.chunks[CODEMIRROR];
+  head.chunks[ADMIN].dynamicImports = [];
+  head.chunks[ENTRY].modules["app/static/codemirror.js"] = 5000;
+  head.chunks[ENTRY].modules["@codemirror/view@6.2.0/dist/index.js"] = 20000;
+  head.importers["app/static/codemirror.js"] = ["app/app.js"];
+
+  const { report } = await compare(baseApp(), head);
+
+  assert.equal(report.movedIntoInitialLoad[0].bytes, 25000);
+});
+
+test("a lazy chunk without a facade is treated as shared", async () => {
+  const head = baseApp();
+  head.chunks[CODEMIRROR].facade = null;
+
+  const { report } = await compare(baseApp(), head);
+
+  assert.ok(report.bundles.every((bundle) => bundle.facade !== null));
+});
