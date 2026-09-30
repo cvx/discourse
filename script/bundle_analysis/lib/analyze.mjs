@@ -8,7 +8,7 @@ import {
 } from "./graph.mjs";
 import { brotliSizes } from "./sizes.mjs";
 
-export const REPORT_SCHEMA = 1;
+export const REPORT_SCHEMA = 2;
 const TOP_MODULES = 5;
 // Smaller module deltas are rebuild noise, e.g. a renumbered import.
 const MIN_MODULE_DELTA = 100;
@@ -134,18 +134,33 @@ function outputFiles(graph) {
   return [...chunkFiles(graph), ...Object.keys(graph.assets)];
 }
 
-/** Modules whose minified bytes grew most between two sets of chunks. */
+/**
+ * Modules whose minified bytes grew most between two sets of chunks. `added`
+ * means new to the build, not just to these chunks: moved code is not new.
+ */
 function moduleDeltas(baseGraph, baseFiles, headGraph, headFiles) {
   const before = moduleBytes(baseGraph, baseFiles);
   const after = moduleBytes(headGraph, headFiles);
+  const inBase = allModules(baseGraph);
   const deltas = [];
   for (const [id, size] of after) {
     const delta = size - (before.get(id) ?? 0);
     if (delta >= MIN_MODULE_DELTA && id !== UNMAPPED) {
-      deltas.push({ id, delta, added: !before.has(id) });
+      deltas.push({ id, delta, added: !inBase.has(id) });
     }
   }
   return deltas.sort((a, b) => b.delta - a.delta).slice(0, TOP_MODULES);
+}
+
+const allModulesCache = new WeakMap();
+function allModules(graph) {
+  if (!allModulesCache.has(graph)) {
+    allModulesCache.set(
+      graph,
+      new Set(moduleBytes(graph, Object.keys(graph.chunks)).keys())
+    );
+  }
+  return allModulesCache.get(graph);
 }
 
 /** Who imports a new bundle, with the importing module. */
@@ -185,12 +200,14 @@ function movedIntoInitialLoad(base, head) {
         facade: owner.facade,
         bytes: 0,
         modules: [],
+        ids: new Set(),
       });
     }
     const group = groups.get(owner.key);
     const bytes = head.graph.chunks[headFile].modules[id];
     group.bytes += bytes;
     group.modules.push({ id, bytes });
+    group.ids.add(id);
   }
 
   return [...groups.values()]
@@ -200,10 +217,7 @@ function movedIntoInitialLoad(base, head) {
       modules: group.modules
         .sort((a, b) => b.bytes - a.bytes)
         .slice(0, TOP_MODULES),
-      importers: staticImportersInInitialLoad(head, [
-        group.facade,
-        ...group.modules.map((m) => m.id),
-      ]),
+      importers: boundaryImports(base, head, group.ids),
     }))
     .sort((a, b) => b.bytes - a.bytes);
 }
@@ -219,16 +233,33 @@ function ownerBundle(build, file) {
     .sort((a, b) => a.key.localeCompare(b.key))[0];
 }
 
-function staticImportersInInitialLoad(head, ids) {
-  for (const id of ids) {
-    const importers = (
-      head.graph.lazyTargets[id]?.staticImporters ?? []
-    ).filter((importer) => head.initial.has(head.moduleChunk.get(importer)));
-    if (importers.length) {
-      return importers.slice(0, 3);
+/**
+ * The imports that pulled moved code in: an initial-load module that did
+ * not move itself importing one that did. Importers that were already in the
+ * initial load come first, as they are the usual cause.
+ */
+function boundaryImports(base, head, movedIds) {
+  const imports = [];
+  for (const id of movedIds) {
+    for (const importer of head.importers.get(id) ?? []) {
+      if (
+        !movedIds.has(importer) &&
+        head.initial.has(head.moduleChunk.get(importer))
+      ) {
+        const wasInitial = base.initial.has(base.moduleChunk.get(importer));
+        imports.push({ from: importer, to: id, wasInitial });
+      }
     }
   }
-  return [];
+  return imports
+    .sort(
+      (a, b) =>
+        b.wasInitial - a.wasInitial ||
+        a.from.localeCompare(b.from) ||
+        a.to.localeCompare(b.to)
+    )
+    .slice(0, 3)
+    .map(({ from, to }) => ({ from, to }));
 }
 
 function compareAssets(baseGraph, baseSizes, headGraph, headSizes) {

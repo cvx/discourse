@@ -40,7 +40,7 @@ test("code keeps untrusted strings inside a code span", () => {
 
 function report(overrides = {}) {
   return {
-    schema: 1,
+    schema: 2,
     noJsChanges: false,
     initialLoad: {
       base: 1_000_000,
@@ -90,7 +90,7 @@ test("tiny changes show as under 0.1%", () => {
 test("no findings means no comment", () => {
   assert.deepEqual(renderComment(report(), BUDGET), { keys: [], body: null });
   assert.equal(
-    renderComment({ schema: 1, noJsChanges: true }, BUDGET).body,
+    renderComment({ schema: 2, noJsChanges: true }, BUDGET).body,
     null
   );
 });
@@ -141,7 +141,7 @@ test("edges that share a target are grouped", () => {
 
 test("the summary renders a no-changes report", () => {
   assert.match(
-    renderSummary({ schema: 1, noJsChanges: true }, BUDGET),
+    renderSummary({ schema: 2, noJsChanges: true }, BUDGET),
     /No JS inputs changed/
   );
 });

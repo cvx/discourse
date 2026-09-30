@@ -110,6 +110,12 @@ async function build(dir) {
   };
 }
 
+function importersOf(graph, id) {
+  return graph.importers[graph.moduleIds.indexOf(id)].map(
+    (i) => graph.moduleIds[i]
+  );
+}
+
 function chunkByLabel(graph, label) {
   const entry = Object.entries(graph.chunks).find(
     ([, chunk]) => chunk.label === label
@@ -134,7 +140,7 @@ test("records entries, lazy chunks and their connections", async () => {
   expect(main.examples[`dynamic:${lazy.file}`]).toEqual([
     { from: "main.js", to: "lazy.js" },
   ]);
-  expect(graph.lazyTargets["lazy.js"]).toEqual({ staticImporters: [] });
+  expect(importersOf(graph, "lazy.js")).toEqual([]);
 });
 
 test("records a dynamic import that rolldown merged into its importer", async () => {
@@ -143,9 +149,14 @@ test("records a dynamic import that rolldown merged into its importer", async ()
 
   expect(Object.keys(main.modules)).toContain("merged.js");
   expect(main.dynamicImports).not.toContain(main.file);
-  expect(graph.lazyTargets["merged.js"]).toEqual({
-    staticImporters: ["main.js"],
-  });
+  expect(importersOf(graph, "merged.js")).toEqual(["main.js"]);
+});
+
+test("records every module's static importers", async () => {
+  const { graph } = await build(writeFixture());
+
+  expect(importersOf(graph, "shared.js")).toEqual(["lazy.js", "main.js"]);
+  expect(importersOf(graph, "lazy-only.js")).toEqual(["lazy.js", "nested.js"]);
 });
 
 test("records URL imports created through virtual:dynamic-chunk-url", async () => {

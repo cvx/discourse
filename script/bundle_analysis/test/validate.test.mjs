@@ -49,7 +49,7 @@ test("rejects wrong types and unknown schemas", async () => {
     )
   );
 
-  assert.throws(() => validateReport({ ...report, schema: 2 }), /schema/);
+  assert.throws(() => validateReport({ ...report, schema: 3 }), /schema/);
   assert.throws(
     () =>
       validateReport({
@@ -86,7 +86,7 @@ test("drops unknown fields", async () => {
 
 test("a no-JS-changes report needs nothing else", () => {
   assert.deepEqual(
-    { ...validateReport({ schema: 1, noJsChanges: true }) },
-    { schema: 1, noJsChanges: true }
+    { ...validateReport({ schema: 2, noJsChanges: true }) },
+    { schema: 2, noJsChanges: true }
   );
 });

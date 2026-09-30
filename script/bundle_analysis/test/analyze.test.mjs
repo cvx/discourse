@@ -67,7 +67,7 @@ test("a lazy bundle merged into the initial load is reported with its static imp
   Object.assign(head.chunks[ENTRY].modules, head.chunks[CODEMIRROR].modules);
   delete head.chunks[CODEMIRROR];
   head.chunks[ADMIN].dynamicImports = [];
-  head.lazyTargets["app/static/codemirror.js"].staticImporters = ["app/app.js"];
+  head.importers["app/static/codemirror.js"] = ["app/app.js"];
 
   const { report, keys } = await compare(baseApp(), head);
   const [moved] = report.movedIntoInitialLoad;
@@ -75,7 +75,9 @@ test("a lazy bundle merged into the initial load is reported with its static imp
   assert.deepEqual(keys, ["moved:lazy:app/static/codemirror.js", "initial"]);
   assert.equal(moved.name, "codemirror");
   assert.equal(moved.bytes, 25000);
-  assert.deepEqual(moved.importers, ["app/app.js"]);
+  assert.deepEqual(moved.importers, [
+    { from: "app/app.js", to: "app/static/codemirror.js" },
+  ]);
   const bundle = report.bundles.find(
     (b) => b.key === "lazy:app/static/codemirror.js"
   );
@@ -183,4 +185,31 @@ test("duplicate package versions are listed", async () => {
   assert.deepEqual(report.duplicatePackages, [
     { name: "moment", versions: ["2.29.0", "2.30.1"], new: true },
   ]);
+});
+
+test("core importing admin code names the import that pulled it in", async () => {
+  const base = baseApp();
+  base.chunks[ADMIN].modules["admin/components/big.gjs"] = 20000;
+  base.importers["admin/components/big.gjs"] = ["admin/components/a.gjs"];
+  const head = clone(base);
+  delete head.chunks[ADMIN].modules["admin/components/big.gjs"];
+  head.chunks[ENTRY].modules["admin/components/big.gjs"] = 20000;
+  head.importers["admin/components/big.gjs"] = [
+    "admin/components/a.gjs",
+    "app/app.js",
+  ];
+
+  const { report, keys } = await compare(base, head);
+  const [moved] = report.movedIntoInitialLoad;
+
+  assert.deepEqual(keys, ["moved:lazy:admin/compat-modules.js", "initial"]);
+  assert.equal(moved.name, "admin");
+  assert.deepEqual(moved.importers, [
+    { from: "app/app.js", to: "admin/components/big.gjs" },
+  ]);
+  assert.deepEqual(report.initialLoad.topModules[0], {
+    id: "admin/components/big.gjs",
+    delta: 20000,
+    added: false,
+  });
 });

@@ -60,7 +60,7 @@ test("decideAction", () => {
 });
 
 const FINDINGS_REPORT = {
-  schema: 1,
+  schema: 2,
   noJsChanges: false,
   initialLoad: {
     base: 1_000_000,
@@ -166,10 +166,10 @@ test("run creates, updates and resolves one comment", async () => {
   assert.equal((await go(FINDINGS_REPORT)).type, "update");
   assert.equal(github.comments.length, 1);
 
-  assert.equal((await go({ schema: 1, noJsChanges: true })).type, "resolve");
+  assert.equal((await go({ schema: 2, noJsChanges: true })).type, "resolve");
   assert.match(github.comments[0].body, /Resolved as of aaaaaaa/);
 
-  assert.equal((await go({ schema: 1, noJsChanges: true })).type, "none");
+  assert.equal((await go({ schema: 2, noJsChanges: true })).type, "none");
 });
 
 test("run ignores comments from other users", async () => {

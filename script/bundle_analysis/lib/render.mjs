@@ -81,12 +81,16 @@ export function renderComment(report, budget, { runUrl } = {}) {
       tableSection(
         "#### ⚠️ Moved into the initial load",
         "This code now downloads on every first page view. If that is unintended, load it with `import()` instead of a static import.",
-        ["Code", "Size (minified)", "Statically imported by"],
-        ["---", "---:", "---"],
+        ["From bundle", "Size (minified)", "Pulled in by", "Largest modules"],
+        ["---", "---:", "---", "---"],
         moved.map(({ group }) => [
           cell(group.name),
           kib(group.bytes),
-          group.importers.map(cell).join(", ") || "–",
+          group.importers.map(importLine).join("<br>") || "–",
+          group.modules
+            .slice(0, 3)
+            .map((m) => `${cell(m.id)} ${kib(m.bytes)}`)
+            .join("<br>"),
         ])
       )
     );
@@ -234,6 +238,10 @@ function tableRow(cells) {
   return `| ${cells.join(" | ")} |`;
 }
 
+function importLine({ from, to }) {
+  return `${cell(from)} imports ${cell(to)}`;
+}
+
 function topModuleCell(modules) {
   const top = modules[0];
   return top ? `${cell(top.id)} ${signedKib(top.delta)}` : "–";
@@ -272,7 +280,7 @@ export function renderSummary(report, budget) {
     lines.push("**Moved into the initial load**", "");
     for (const group of report.movedIntoInitialLoad) {
       lines.push(
-        `- ${code(group.name)}: ${kib(group.bytes)} minified${group.importers.length ? `, statically imported by ${names(group.importers)}` : ""}`
+        `- ${code(group.name)}: ${kib(group.bytes)} minified${group.importers.length ? `, pulled in by ${group.importers.map(importLine).join(", ")}` : ""}`
       );
     }
     lines.push("");
@@ -368,10 +376,6 @@ function groupEdges(edges) {
 function exampleText(examples) {
   const example = examples?.[0];
   return example ? `, from ${code(example.from)}` : "";
-}
-
-function names(ids) {
-  return ids.map(code).join(", ");
 }
 
 function moduleLine(module) {

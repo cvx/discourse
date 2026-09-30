@@ -16,11 +16,11 @@ const SEMICOLON = ";".charCodeAt(0);
 /**
  * Writes `manifest/bundle-graph.json`: every chunk's modules (with minified
  * bytes), its static, dynamic and URL imports, example module-level imports
- * behind each cross-chunk edge, and the static importers of every lazily
- * imported module. Static importers explain a lazy module merged into its
- * importer's chunk; rolldown's INEFFECTIVE_DYNAMIC_IMPORT warning arrives
- * only after generateBundle, so it cannot be recorded here. CI compares this
- * file between builds to report new bundles, growth and new connections.
+ * behind each cross-chunk edge, and every module's static importers. The
+ * importers explain code that moved into another chunk, such as lazy code
+ * now imported statically, where no cross-chunk import is left to show it.
+ * CI compares this file between builds to report new bundles, growth and
+ * new connections.
  *
  * @param {{ root: string }} options `root` makes module ids relative.
  */
@@ -43,7 +43,7 @@ export default function bundleGraphPlugin({ root }) {
       const chunks = {};
       const assets = {};
       const entries = {};
-      const lazyTargets = {};
+      const importers = new Map();
 
       for (const [fileName, output] of Object.entries(bundle)) {
         if (output.type !== "chunk") {
@@ -100,13 +100,7 @@ export default function bundleGraphPlugin({ root }) {
             addExample("dynamic", moduleId, imported);
           }
 
-          if (info.dynamicImporters.length > 0) {
-            lazyTargets[normalize(moduleId)] = {
-              staticImporters: [
-                ...new Set(info.importers.map(normalize)),
-              ].sort(),
-            };
-          }
+          importers.set(normalize(moduleId), info.importers.map(normalize));
         }
 
         chunks[fileName] = {
@@ -134,11 +128,11 @@ export default function bundleGraphPlugin({ root }) {
         type: "asset",
         fileName: "manifest/bundle-graph.json",
         source: stableStringify({
-          version: 1,
+          version: 2,
           entries,
           chunks,
           assets,
-          lazyTargets,
+          ...indexedImporters(importers),
         }),
       });
     },
@@ -317,6 +311,24 @@ function moduleBytes(chunk, fileName, outDir, normalize) {
     bytes[UNMAPPED] = (bytes[UNMAPPED] ?? 0) + totals[unmapped];
   }
   return bytes;
+}
+
+/**
+ * `moduleIds` sorted, and `importers[i]` as indices into it: the importer
+ * graph has tens of thousands of edges, which as strings would triple the
+ * file.
+ */
+function indexedImporters(importers) {
+  const moduleIds = [...importers.keys()].sort();
+  const indexOf = new Map(moduleIds.map((id, i) => [id, i]));
+  return {
+    moduleIds,
+    importers: moduleIds.map((id) =>
+      [...new Set(importers.get(id).map((importer) => indexOf.get(importer)))]
+        .filter((i) => i !== undefined)
+        .sort((a, b) => a - b)
+    ),
+  };
 }
 
 /** JSON with object keys sorted, so the file is reproducible. */

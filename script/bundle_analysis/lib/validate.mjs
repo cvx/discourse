@@ -54,7 +54,7 @@ export function validateReport(input) {
         name: str,
         bytes: num,
         modules: list(shape({ id: str, bytes: num })),
-        importers: list(str),
+        importers: list(example),
       })
     ),
     edges: shape({ added: list(edge), removed: list(edge) }),

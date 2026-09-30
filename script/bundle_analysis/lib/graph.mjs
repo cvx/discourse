@@ -40,7 +40,7 @@ export function loadGraph(distDir) {
     );
   }
   const graph = JSON.parse(readFileSync(path, "utf8"));
-  if (graph.version !== 1) {
+  if (graph.version !== 2) {
     throw new Error(`${path} has unsupported version ${graph.version}`);
   }
   return graph;
@@ -137,8 +137,16 @@ export function describeBuild(graph, { mainEntry = MAIN_ENTRY } = {}) {
     }
   }
 
+  const importers = new Map(
+    graph.moduleIds.map((id, i) => [
+      id,
+      graph.importers[i].map((index) => graph.moduleIds[index]),
+    ])
+  );
+
   return {
     graph,
+    importers,
     mainKey: `entry:${mainEntry}`,
     initial,
     bundles,

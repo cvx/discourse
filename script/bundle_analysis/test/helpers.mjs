@@ -22,9 +22,9 @@ function text(seed, length) {
  * each module's content depends only on its id, so moving a module between
  * chunks keeps the bytes.
  */
-export function makeDist({ entries, chunks, assets = {}, lazyTargets = {} }) {
+export function makeDist({ entries, chunks, assets = {}, importers = {} }) {
   const dir = mkdtempSync(join(tmpdir(), "bundle-dist-"));
-  const graph = { version: 1, entries, chunks: {}, assets: {}, lazyTargets };
+  const graph = { version: 2, entries, chunks: {}, assets: {} };
 
   for (const [file, chunk] of Object.entries(chunks)) {
     const content = Object.entries(chunk.modules)
@@ -57,6 +57,12 @@ export function makeDist({ entries, chunks, assets = {}, lazyTargets = {} }) {
         .replace(/-[a-z0-9]+(\.digested)?\.[a-z0-9]+$/, ""),
     };
   }
+  graph.moduleIds = [
+    ...new Set(Object.values(chunks).flatMap((c) => Object.keys(c.modules))),
+  ].sort();
+  graph.importers = graph.moduleIds.map((id) =>
+    (importers[id] ?? []).map((importer) => graph.moduleIds.indexOf(importer))
+  );
   mkdirSync(join(dir, "manifest"), { recursive: true });
   writeFileSync(join(dir, "manifest/bundle-graph.json"), JSON.stringify(graph));
   return dir;
@@ -108,16 +114,7 @@ export function baseApp(overrides = {}) {
       },
       ...overrides,
     },
-    lazyTargets: {
-      "admin/compat-modules.js": {
-        staticImporters: [],
-        dynamicImporters: ["app/app.js"],
-      },
-      "app/static/codemirror.js": {
-        staticImporters: [],
-        dynamicImporters: ["admin/components/a.gjs"],
-      },
-    },
+    importers: {},
   };
 }
 
