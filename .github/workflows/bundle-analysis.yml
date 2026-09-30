@@ -1,0 +1,119 @@
+name: Bundle analysis
+
+# Compares the core JS build of a PR with its base. Runs PR code, so it only
+# reads: bundle-analysis-comment.yml posts the result from the default branch.
+# See script/bundle_analysis/README.md.
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: bundle-analysis-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ (github.repository_owner == 'discourse' && 'cdck-linux-8-core') || 'ubuntu-latest' }}
+    container: discourse/discourse_test:release
+    timeout-minutes: 20
+
+    steps:
+      - name: Set working directory owner
+        run: chown root:root .
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+
+      - name: Analyzer tests
+        run: node --test "script/bundle_analysis/test/*.test.mjs"
+
+      - name: Check for JS changes
+        id: changes
+        run: |
+          base=$(git rev-parse HEAD^1)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if git diff --quiet "$base" HEAD -- frontend package.json pnpm-lock.yaml pnpm-workspace.yaml patches .pnpmfile.cjs .npmrc; then
+            echo "js=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "js=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: pnpm install
+        if: steps.changes.outputs.js == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the PR
+        if: steps.changes.outputs.js == 'true'
+        working-directory: frontend/discourse
+        env:
+          EMBER_ENV: production
+          CI: "1"
+        run: pnpm build
+
+      - name: Find the baseline
+        if: steps.changes.outputs.js == 'true'
+        env:
+          BASE: ${{ steps.changes.outputs.base }}
+        run: node script/bundle_analysis/baseline.mjs --commit "$BASE" --out "$RUNNER_TEMP/base"
+
+      - name: Analyze
+        env:
+          JS_CHANGED: ${{ steps.changes.outputs.js }}
+        run: |
+          out="$RUNNER_TEMP/bundle-analysis"
+          if [ "$JS_CHANGED" = "true" ]; then
+            node script/bundle_analysis/analyze.mjs --base "$RUNNER_TEMP/base" --head frontend/discourse/dist --out "$out"
+          else
+            node script/bundle_analysis/analyze.mjs --no-js-changes --out "$out"
+          fi
+          cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/artifact"
+          mv "$out/report.json" "$RUNNER_TEMP/artifact/report.json"
+
+      - name: Record the PR
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: >
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({
+            number: Number(process.env.PR_NUMBER),
+            head_sha: process.env.HEAD_SHA,
+            head_repo: process.env.HEAD_REPO,
+          }))' "$RUNNER_TEMP/artifact/pr.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-analysis
+          path: ${{ runner.temp }}/artifact
+          retention-days: 7
+          if-no-files-found: error
+
+  reproducibility:
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ (github.repository_owner == 'discourse' && 'cdck-linux-8-core') || 'ubuntu-latest' }}
+    container: discourse/discourse_test:release
+    timeout-minutes: 30
+
+    steps:
+      - name: Set working directory owner
+        run: chown root:root .
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+
+      - name: Rebuild a published build and compare
+        run: node script/bundle_analysis/reproducibility.mjs
