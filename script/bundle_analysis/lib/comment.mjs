@@ -155,7 +155,7 @@ export async function run({ github, context, core, artifactDir, budgetPath }) {
       owner,
       repo,
       comment_id: action.comment.id,
-      body: `### JS bundle changes\n\nResolved as of ${shortSha}: nothing over the thresholds.\n\n${marker("resolved", [])}`,
+      body: `### 📦 JS bundle changes\n\n✅ Resolved as of ${shortSha}: nothing over the thresholds.\n\n${marker("resolved", [])}`,
     });
   } else if (action.type === "update") {
     await github.rest.issues.updateComment({
@@ -176,7 +176,7 @@ export async function run({ github, context, core, artifactDir, budgetPath }) {
         owner,
         repo,
         comment_id: action.comment.id,
-        body: `### JS bundle changes\n\nSuperseded by [a newer report](${created.html_url}).\n\n${marker("superseded", [])}`,
+        body: `### 📦 JS bundle changes\n\nSuperseded by [a newer report](${created.html_url}).\n\n${marker("superseded", [])}`,
       });
     }
   }

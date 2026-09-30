@@ -383,11 +383,16 @@ function delta(base, head) {
   if (change === 0) {
     return "0";
   }
-  const percent =
-    base > 0
-      ? `, ${change > 0 ? "+" : ""}${((change / base) * 100).toFixed(1)}%`
-      : "";
+  const percent = base > 0 ? `, ${percentChange(change, base)}` : "";
   return `${signedKib(change)}${percent}`;
+}
+
+function percentChange(change, base) {
+  const percent = (change / base) * 100;
+  if (Math.abs(percent) < 0.1) {
+    return `${change > 0 ? "+" : "-"}<0.1%`;
+  }
+  return `${change > 0 ? "+" : ""}${percent.toFixed(1)}%`;
 }
 
 export function kib(bytes) {

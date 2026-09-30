@@ -63,6 +63,30 @@ function report(overrides = {}) {
   };
 }
 
+test("tiny changes show as under 0.1%", () => {
+  const { body } = renderComment(
+    report({
+      initialLoad: { ...report().initialLoad, head: 999_609 },
+      edges: {
+        added: [
+          {
+            from: "a",
+            to: "b",
+            kind: "dynamic",
+            fromName: "a",
+            toName: "b",
+            examples: [],
+          },
+        ],
+        removed: [],
+      },
+    }),
+    BUDGET
+  );
+
+  assert.ok(body.includes("(-391 B, -<0.1%)"));
+});
+
 test("no findings means no comment", () => {
   assert.deepEqual(renderComment(report(), BUDGET), { keys: [], body: null });
   assert.equal(
