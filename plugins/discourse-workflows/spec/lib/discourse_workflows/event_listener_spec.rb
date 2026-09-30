@@ -17,6 +17,9 @@ RSpec.describe DiscourseWorkflows::EventListener do
     DiscourseWorkflows::WorkflowDependency.clear_cache!
   end
 
+  # The in-memory trigger cache outlives the DB rollback and would fire in later specs.
+  after { DiscourseWorkflows::WorkflowDependency.clear_cache! }
+
   it "enqueues a job when a matching event fires" do
     graph = build_workflow_graph { |g| g.node "trigger-1", "trigger:topic_closed" }
     workflow = Fabricate(:discourse_workflows_workflow, created_by: user, published: true, **graph)
@@ -46,13 +49,30 @@ RSpec.describe DiscourseWorkflows::EventListener do
     expect(jobs).to be_empty
   end
 
+  it "enqueues tag created workflows with the tag payload" do
+    create_published_workflow("tag-created-trigger", "trigger:tag_created")
+
+    created_tag = Fabricate(:tag, name: "new-workflow-tag")
+
+    expect(enqueued_trigger_node_ids).to contain_exactly("tag-created-trigger")
+    expect(trigger_data_for("tag-created-trigger")).to include(
+      "tag" =>
+        include(
+          "id" => created_tag.id,
+          "name" => created_tag.name,
+          "slug" => created_tag.slug,
+          "description" => created_tag.description,
+        ),
+    )
+  end
+
   it "only enqueues topic closed workflows matching the category and tags" do
     topic.tags << tag
     create_published_workflow(
       "matching-trigger",
       "trigger:topic_closed",
       configuration: {
-        "category_id" => category.id.to_s,
+        "category_ids" => [category.id.to_s],
         "tag_names" => [tag.name],
       },
     )
@@ -60,7 +80,7 @@ RSpec.describe DiscourseWorkflows::EventListener do
       "category-mismatch",
       "trigger:topic_closed",
       configuration: {
-        "category_id" => other_category.id.to_s,
+        "category_ids" => [other_category.id.to_s],
       },
     )
     create_published_workflow(
@@ -84,7 +104,7 @@ RSpec.describe DiscourseWorkflows::EventListener do
       "matching-trigger",
       "trigger:topic_created",
       configuration: {
-        "category_id" => category.id.to_s,
+        "category_ids" => [category.id.to_s],
         "tag_names" => [tag.name],
       },
     )
@@ -92,7 +112,7 @@ RSpec.describe DiscourseWorkflows::EventListener do
       "category-mismatch",
       "trigger:topic_created",
       configuration: {
-        "category_id" => other_category.id.to_s,
+        "category_ids" => [other_category.id.to_s],
       },
     )
     create_published_workflow(
@@ -115,7 +135,7 @@ RSpec.describe DiscourseWorkflows::EventListener do
       "matching-trigger",
       "trigger:post_created",
       configuration: {
-        "category_id" => category.id.to_s,
+        "category_ids" => [category.id.to_s],
         "tag_names" => [tag.name],
       },
     )
@@ -123,7 +143,7 @@ RSpec.describe DiscourseWorkflows::EventListener do
       "category-mismatch",
       "trigger:post_created",
       configuration: {
-        "category_id" => other_category.id.to_s,
+        "category_ids" => [other_category.id.to_s],
       },
     )
     create_published_workflow(
@@ -147,7 +167,7 @@ RSpec.describe DiscourseWorkflows::EventListener do
       "matching-trigger",
       "trigger:post_edited",
       configuration: {
-        "category_id" => category.id.to_s,
+        "category_ids" => [category.id.to_s],
         "tag_names" => [tag.name],
         "trust_levels" => ["1"],
       },
@@ -191,6 +211,27 @@ RSpec.describe DiscourseWorkflows::EventListener do
     PostRevisor.new(post).revise!(admin, { raw: "Edited by workflow" }, skip_workflows: true)
 
     expect(enqueued_trigger_node_ids).not_to include("post-edited-trigger")
+  end
+
+  it "enqueues post destroyed workflows only when the deletion does not skip them" do
+    post = create_post(category: category)
+    skipped = create_post(category: category)
+    create_published_workflow("post-destroyed-trigger", "trigger:post_destroyed")
+
+    PostDestroyer.new(admin, skipped, skip_workflows: true).destroy
+    PostDestroyer.new(admin, post).destroy
+
+    expect(enqueued_trigger_node_ids).to contain_exactly("post-destroyed-trigger")
+  end
+
+  it "enqueues post recovered workflows from the post recovered event" do
+    post = create_post(category: category)
+    PostDestroyer.new(admin, post).destroy
+    create_published_workflow("post-recovered-trigger", "trigger:post_recovered")
+
+    PostDestroyer.new(admin, post.reload).recover
+
+    expect(enqueued_trigger_node_ids).to include("post-recovered-trigger")
   end
 
   it "only enqueues reviewable approved workflows matching the reviewable type" do
@@ -443,6 +484,93 @@ RSpec.describe DiscourseWorkflows::EventListener do
         "action" => "removed",
         "automatic" => nil,
       },
+    )
+  end
+
+  it "enqueues user created workflows with the staged flag in the payload" do
+    create_published_workflow("user-created-trigger", "trigger:user_created")
+
+    new_user = Fabricate(:user)
+
+    expect(enqueued_trigger_node_ids).to contain_exactly("user-created-trigger")
+    expect(Jobs::DiscourseWorkflows::ExecuteWorkflow.jobs.last["args"].first["user_id"]).to eq(
+      new_user.id,
+    )
+
+    trigger_data = trigger_data_for("user-created-trigger")
+    expect(trigger_data).to include(
+      "user" => include("id" => new_user.id, "username" => new_user.username, "staged" => false),
+    )
+
+    Jobs::DiscourseWorkflows::ExecuteWorkflow.jobs.clear
+    staged_user = Fabricate(:user, staged: true)
+
+    expect(enqueued_trigger_node_ids).to contain_exactly("user-created-trigger")
+    expect(trigger_data_for("user-created-trigger")).to include(
+      "user" => include("id" => staged_user.id, "staged" => true),
+    )
+  end
+
+  it "only enqueues user updated workflows matching the selected groups" do
+    group = Fabricate(:group)
+    group.add(user)
+    Jobs::DiscourseWorkflows::ExecuteWorkflow.jobs.clear
+
+    create_published_workflow("user-updated-trigger", "trigger:user_updated")
+    create_published_workflow(
+      "matching-group-updated-trigger",
+      "trigger:user_updated",
+      configuration: {
+        "group_ids" => [group.id.to_s],
+      },
+    )
+    create_published_workflow(
+      "group-mismatch-updated-trigger",
+      "trigger:user_updated",
+      configuration: {
+        "group_ids" => [other_group.id.to_s],
+      },
+    )
+
+    UserUpdater.new(admin, user).update(bio_raw: "Updated bio")
+
+    expect(enqueued_trigger_node_ids).to contain_exactly(
+      "user-updated-trigger",
+      "matching-group-updated-trigger",
+    )
+
+    trigger_data = trigger_data_for("user-updated-trigger")
+    expect(trigger_data).to include("user" => include("id" => user.id, "username" => user.username))
+  end
+
+  it "only enqueues reviewable created workflows matching the selected types" do
+    create_published_workflow("reviewable-created-trigger", "trigger:reviewable_created")
+    create_published_workflow(
+      "matching-type-created-trigger",
+      "trigger:reviewable_created",
+      configuration: {
+        "reviewable_types" => ["ReviewableFlaggedPost"],
+      },
+    )
+    create_published_workflow(
+      "type-mismatch-created-trigger",
+      "trigger:reviewable_created",
+      configuration: {
+        "reviewable_types" => ["ReviewableUser"],
+      },
+    )
+
+    reviewable = Fabricate(:reviewable_flagged_post)
+
+    expect(enqueued_trigger_node_ids).to contain_exactly(
+      "reviewable-created-trigger",
+      "matching-type-created-trigger",
+    )
+
+    trigger_data = trigger_data_for("reviewable-created-trigger")
+    expect(trigger_data).to include(
+      "reviewable" =>
+        include("id" => reviewable.id, "type" => "ReviewableFlaggedPost", "status" => "pending"),
     )
   end
 

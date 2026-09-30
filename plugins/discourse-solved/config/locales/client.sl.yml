@@ -14,8 +14,6 @@ sl:
               label: "Sprejete rešitve"
         sections:
           support:
-            filter:
-              all_categories: "Vse kategorije"
             answerers:
               staff: "Osebje"
               member: "Člani"
@@ -24,6 +22,9 @@ sl:
               buckets:
                 lt_1h: "< 1 ura"
   js:
+    discourse_workflows:
+      solution_changed:
+        tag_names: "Oznake"
     notifications:
       alt:
         solved:
@@ -74,6 +75,11 @@ sl:
           solved: "so rešene"
           unsolved: "so nerešene"
     admin:
+      reports:
+        related_items:
+          labels:
+            topic: "Tema"
+            category: "Kategorija"
       web_hooks:
         solved_event:
           group_name: "Rešen dogodek"

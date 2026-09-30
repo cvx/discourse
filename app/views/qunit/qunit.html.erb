@@ -7,24 +7,7 @@
     <meta name="color-scheme" content="light dark">
 
     <%- if @has_test_bundle %>
-      <%= preload_script_url ExtraLocalesController.url("main"), type_module: true %>
-      <%= preload_script_url ExtraLocalesController.url("mf"), type_module: true %>
-      <%= preload_script_url ExtraLocalesController.url("admin"), type_module: true %>
-      <%= preload_script_url ExtraLocalesController.url("wizard"), type_module: true %>
-      <%= theme_translations_lookup %>
-
-      <script nonce="<%= csp_nonce_placeholder %>">
-        window._discourseQunitPluginNames = <%= Discourse.plugins.map(&:directory_name).to_json.html_safe %>;
-      </script>
-
-      <%= tag.iframe srcdoc: tag.script(
-        src: script_asset_path(EmberAssets.script_chunks["qunit-live-reload"].first),
-        nonce: csp_nonce_placeholder,
-        type: "module",
-      ), style: "display: none;" %>
-
-      <%= preload_script "test-support" %>
-
+      <%# Browsers may ignore an import map that appears after any module script has started loading %>
       <%= render "layouts/plugin_js",
         opts: {
           include_disabled: true,
@@ -33,6 +16,28 @@
           only: @required_plugins
         }
       %>
+
+      <%= preload_script_url ExtraLocalesController.url("main"), type_module: true %>
+      <%= preload_script_url ExtraLocalesController.url("mf"), type_module: true %>
+      <%= preload_script_url ExtraLocalesController.url("admin"), type_module: true %>
+      <%= preload_script_url ExtraLocalesController.url("wizard"), type_module: true %>
+      <%= theme_translations_lookup %>
+
+      <script nonce="<%= csp_nonce_placeholder %>">
+        window._discourseQunitPluginNames = <%= Discourse.plugins.map(&:directory_name).to_json.html_safe %>;
+
+        window.onunhandledrejection = (event) => {
+          // reports test boot failures to testem, so the browser doesn't hang forever
+          window.Testem?.emit(
+            "top-level-error",
+            String(event.reason),
+            "qunit.html.erb",
+            "?"
+          );
+        };
+      </script>
+
+      <%= preload_script "test-support" %>
 
       <%= theme_lookup("head_tag") %>
       <%= theme_tests %>
@@ -49,7 +54,7 @@
       <link rel="canonical" href="/">
 
       <style>
-        <%= File.read("#{Rails.root}/frontend/discourse/node_modules/qunit/qunit/qunit.css").html_safe %>
+        <%= File.read(Rails.root.join("frontend/discourse/node_modules/qunit/qunit/qunit.css")).html_safe %>
 
         #ember-testing * {
           -webkit-transition: none !important;
@@ -60,7 +65,6 @@
       </style>
 
       <%= discourse_stylesheet_link_tag(:common, theme_id: nil) %>
-      <%= discourse_stylesheet_link_tag(:desktop, theme_id: nil) %>
       <%= discourse_stylesheet_link_tag(:admin) %>
       <%= discourse_stylesheet_link_tag(:wizard) %>
 
@@ -86,8 +90,16 @@
       </script>
 
       <%= preload_script "test-entrypoint", type_module: true %>
+
+      <%# Kept out of the head: an iframe there ends head parsing early and demotes every later stylesheet to the body, where it no longer blocks the entrypoint. %>
+      <%= tag.iframe srcdoc: tag.script(
+        src: script_asset_path(EmberAssets.script_chunks["qunit-live-reload"].first),
+        nonce: csp_nonce_placeholder,
+        type: "module",
+      ), style: "display: none;" %>
     <%- end %>
 
+    <%# Stays last on purpose: the test runner injects its own stylesheet into the head at runtime, and this one must follow it in the cascade to restyle the runner. %>
     <%= discourse_stylesheet_link_tag("qunit-custom", theme_id: nil) %>
   </body>
 </html>

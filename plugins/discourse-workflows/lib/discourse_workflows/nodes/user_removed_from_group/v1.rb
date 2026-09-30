@@ -12,7 +12,7 @@ module DiscourseWorkflows
             color: "grey",
           },
           group: "discourse_triggers",
-          events: [:user_removed_from_group],
+          event: :user_removed_from_group,
           output_contracts: [{ schema: Schema::USER_REMOVED_FROM_GROUP_SCHEMA }],
           properties: {
             group_id: {
@@ -29,7 +29,6 @@ module DiscourseWorkflows
                 value_property: "id",
                 name_property: "name",
                 filterable: true,
-                none: "discourse_workflows.user_removed_from_group.group_id_placeholder",
               },
             },
           },

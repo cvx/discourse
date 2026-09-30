@@ -205,6 +205,25 @@ module("Unit | Controller | nested", function (hooks) {
     );
   });
 
+  test("deleting a regular post does not expose the activity log", function (assert) {
+    const topic = buildTopic(this.store, 724);
+    const post = buildPost(this.store, topic, 2001, 2);
+
+    this.controller.topic = topic;
+    this.controller.postRegistry.set(post.post_number, post);
+
+    this.controller._onMessage(
+      { type: "deleted", id: post.id, user_id: this.currentUser.id },
+      null,
+      123
+    );
+
+    assert.false(
+      Boolean(this.controller.topic.has_activity_log),
+      "keeps the activity link hidden"
+    );
+  });
+
   test("context view ignores queued new root replies", async function (assert) {
     const topic = buildTopic(this.store, 724);
     const contextRoot = buildPost(this.store, topic, 1001, 2);
@@ -351,6 +370,64 @@ module("Unit | Controller | nested", function (hooks) {
         captureChildCreated
       );
     }
+  });
+
+  test("live deep replies target the capped-depth container", async function (assert) {
+    const topic = buildTopic(this.store, 724);
+    const root = buildPost(this.store, topic, 1001, 45);
+    const secondLevel = buildPost(this.store, topic, 1002, 46);
+    const boundaryParent = buildPost(this.store, topic, 1003, 47);
+    const boundaryChild = buildPost(this.store, topic, 1004, 48);
+    const deepPostId = 2001;
+    let childCreatedEvent;
+
+    secondLevel.set("reply_to_post_number", root.post_number);
+    boundaryParent.set("reply_to_post_number", secondLevel.post_number);
+    boundaryChild.set("reply_to_post_number", boundaryParent.post_number);
+
+    this.owner.lookup(
+      "service:site-settings"
+    ).nested_replies_cap_nesting_depth = true;
+    this.owner.lookup("service:site-settings").nested_replies_max_depth = 3;
+    this.controller.topic = topic;
+    this.controller.subscribe();
+    [root, secondLevel, boundaryParent, boundaryChild].forEach((post) =>
+      this.appEvents.trigger("nested-replies:post-registered", post)
+    );
+    this.appEvents.on("nested-replies:child-created", this, (event) => {
+      childCreatedEvent = event;
+    });
+
+    pretender.get(`/posts/${deepPostId}.json`, () =>
+      response({
+        id: deepPostId,
+        post_number: 56,
+        topic_id: topic.id,
+        user_id: this.currentUser.id,
+        username: this.currentUser.username,
+        avatar_template: this.currentUser.avatar_template,
+        cooked: "<p>Deep reply</p>",
+        created_at: "2026-01-01T00:00:00.000Z",
+        actions_summary: [],
+        direct_reply_count: 0,
+        total_descendant_count: 0,
+        reply_to_post_number: boundaryChild.post_number,
+        children: [],
+      })
+    );
+
+    this.controller._onMessage(
+      { type: "created", id: deepPostId, user_id: this.currentUser.id },
+      null,
+      123
+    );
+    await settled();
+
+    assert.strictEqual(
+      childCreatedEvent?.parentPostNumber,
+      boundaryParent.post_number,
+      "dispatches beneath the parent whose children render at the depth cap"
+    );
   });
 
   test("acted event refreshes actionByName so the flag modal stays in sync", async function (assert) {

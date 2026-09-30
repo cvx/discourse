@@ -1,13 +1,11 @@
 # frozen_string_literal: true
 
-require_relative "../support/assign_allowed_group"
-
 describe UserBookmarkBaseSerializer do
   include_context "with group that is allowed to assign"
 
   before do
     SiteSetting.assign_enabled = true
-    add_to_assign_allowed_group(user)
+    assign_allowed_group.add(user)
   end
 
   fab!(:user)
@@ -17,6 +15,7 @@ describe UserBookmarkBaseSerializer do
 
   context "for Topic bookmarkable" do
     let!(:bookmark) { Fabricate(:bookmark, user: user, bookmarkable: post.topic) }
+
     it "includes assigned user in serializer" do
       Assigner.new(topic, user).assign(user)
       serializer = UserTopicBookmarkSerializer.new(bookmark, scope: guardian)
@@ -38,6 +37,7 @@ describe UserBookmarkBaseSerializer do
 
   context "for Post bookmarkable" do
     let!(:bookmark) { Fabricate(:bookmark, user: user, bookmarkable: post) }
+
     it "includes assigned user in serializer" do
       Assigner.new(post, user).assign(user)
       serializer = UserPostBookmarkSerializer.new(bookmark, scope: guardian)

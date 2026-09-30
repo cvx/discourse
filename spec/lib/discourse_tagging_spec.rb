@@ -118,6 +118,22 @@ RSpec.describe DiscourseTagging do
     end
   end
 
+  describe ".filter_visible_in_accessible_categories" do
+    it "treats a nil guardian as anonymous" do
+      public_tag = Fabricate(:tag)
+      restricted_tag = Fabricate(:tag)
+      private_category = Fabricate(:private_category, group: Group[:staff])
+      private_category.tags = [restricted_tag]
+
+      visible_tags =
+        DiscourseTagging.filter_visible_in_accessible_categories(
+          Tag.where(id: [public_tag.id, restricted_tag.id]),
+        )
+
+      expect(visible_tags).to contain_exactly(public_tag)
+    end
+  end
+
   describe "#validate_one_tag_from_group_per_topic" do
     fab!(:tag_group) { Fabricate(:tag_group, tags: [tag1, tag2, tag3], one_per_topic: true) }
     fab!(:topic)
@@ -581,17 +597,17 @@ RSpec.describe DiscourseTagging do
           Fabricate(:tag_group, permissions: { "staff" => 1 }, tag_names: [hidden_tag.name])
         end
 
-        it "should return staff tags to admin" do
+        it "returns staff tags to admins" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(admin)).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3, hidden_tag]))
         end
 
-        it "should return staff tags to moderator" do
+        it "returns staff tags to moderators" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(moderator), for_input: true).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3, hidden_tag]))
         end
 
-        it "should not return hidden tag to non-staff" do
+        it "hides staff tags from non-staff users" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(user)).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3]))
         end
@@ -603,17 +619,17 @@ RSpec.describe DiscourseTagging do
           Fabricate(:tag_group, permissions: { "admins" => 1 }, tag_names: [admin_only_tag.name])
         end
 
-        it "should return admin-only tags to admin" do
+        it "returns admin-only tags to admins" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(admin), for_input: true).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3, admin_only_tag]))
         end
 
-        it "should not return admin-only tags to moderator" do
+        it "hides admin-only tags from moderators" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(moderator), for_input: true).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3]))
         end
 
-        it "should not return admin-only tags to regular user" do
+        it "hides admin-only tags from regular users" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(user), for_input: true).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3]))
         end
@@ -628,12 +644,12 @@ RSpec.describe DiscourseTagging do
 
         before { group.add(user) }
 
-        it "should return all tags to member of group" do
+        it "returns all tags to group members" do
           tags = DiscourseTagging.filter_allowed_tags(Guardian.new(user)).to_a
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3, hidden_tag]))
         end
 
-        it "should allow a tag group to have multiple group permissions" do
+        it "allows a tag group to have multiple group permissions" do
           group2 = Fabricate(:group, name: "another-group")
           user2 = Fabricate(:user)
           user3 = Fabricate(:user)
@@ -650,12 +666,12 @@ RSpec.describe DiscourseTagging do
           expect(sorted_tag_names(tags)).to eq(sorted_tag_names([tag1, tag2, tag3]))
         end
 
-        it "should not hide group tags to member of group" do
+        it "shows group tags to group members" do
           tags = DiscourseTagging.hidden_tag_names(Guardian.new(user)).to_a
           expect(sorted_tag_names(tags)).to eq([])
         end
 
-        it "should hide group tags to non-member of group" do
+        it "hides group tags from non-members" do
           other_user = Fabricate(:user)
           tags = DiscourseTagging.hidden_tag_names(Guardian.new(other_user)).to_a
           expect(sorted_tag_names(tags)).to eq([hidden_tag.name])
@@ -1116,6 +1132,7 @@ RSpec.describe DiscourseTagging do
     let!(:staff_tag_group) do
       Fabricate(:tag_group, permissions: { "staff" => 1 }, tag_names: [hidden_tag.name])
     end
+
     fab!(:topic) { Fabricate(:topic, tags: [tag1, tag2, tag3, hidden_tag]) }
 
     it "returns all tags to staff" do
@@ -1137,6 +1154,31 @@ RSpec.describe DiscourseTagging do
       tags = DiscourseTagging.filter_visible(topic.tags, Guardian.new(user))
       expect(tags.size).to eq(4)
       expect(tags).to contain_exactly(tag1, tag2, tag3, staff_tag)
+    end
+  end
+
+  describe "without_pm_only_tags" do
+    fab!(:pm_only_tag) { Fabricate(:tag, pm_topic_count: 1) }
+    fab!(:used_tag) { Fabricate(:tag, public_topic_count: 1, staff_topic_count: 1) }
+    fab!(:unused_tag, :tag)
+    fab!(:staff_seen_tag) { Fabricate(:tag, staff_topic_count: 1, pm_topic_count: 1) }
+
+    let(:all_tags) { Tag.where(id: [pm_only_tag, used_tag, unused_tag, staff_seen_tag]) }
+
+    it "rejects tags only used in personal messages for users who cannot tag PMs" do
+      tags = DiscourseTagging.without_pm_only_tags(all_tags, Guardian.new(user))
+      expect(tags).to contain_exactly(used_tag, unused_tag)
+    end
+
+    it "uses the staff topic count for staff users" do
+      tags = DiscourseTagging.without_pm_only_tags(all_tags, Guardian.new(admin))
+      expect(tags).to contain_exactly(used_tag, unused_tag, staff_seen_tag)
+    end
+
+    it "keeps all tags for users who can tag PMs" do
+      SiteSetting.pm_tags_allowed_for_groups = Group::AUTO_GROUPS[:trust_level_0]
+      tags = DiscourseTagging.without_pm_only_tags(all_tags, Guardian.new(user))
+      expect(tags).to contain_exactly(pm_only_tag, used_tag, unused_tag, staff_seen_tag)
     end
   end
 
@@ -1256,7 +1298,7 @@ RSpec.describe DiscourseTagging do
           expect(topic.errors[:base]).to be_empty
         end
 
-        it "will return error if user is not in correct group" do
+        it "returns an error if the user is not in the required group" do
           user2 = Fabricate(:user)
           valid = DiscourseTagging.tag_topic_by_names(topic, Guardian.new(user2), ["alpha"])
           expect(valid).to eq(false)
@@ -1356,6 +1398,7 @@ RSpec.describe DiscourseTagging do
       let!(:staff_tag_group) do
         Fabricate(:tag_group, permissions: { "staff" => 1 }, tag_names: [hidden_tag.name])
       end
+
       fab!(:topic) { Fabricate(:topic, user: user) }
       fab!(:post) { Fabricate(:post, user: user, topic: topic, post_number: 1) }
 
@@ -2063,7 +2106,7 @@ RSpec.describe DiscourseTagging do
 
     # this test is to make sure that the parent tag is the only one returned when the child tag is also in a tag group
     # allowed in the category
-    it "Will only return the parent tag" do
+    it "returns only the parent tag" do
       tags =
         DiscourseTagging.filter_allowed_tags(
           Guardian.new(user),
@@ -2107,6 +2150,19 @@ RSpec.describe DiscourseTagging do
 
       staff_tag_group.update(tag_names: [other_staff_tag.name])
       expect(DiscourseTagging.staff_tag_names).to contain_exactly(other_staff_tag.name)
+    end
+  end
+
+  describe ".editable_synonym_ids" do
+    it "returns only tags the guardian can edit" do
+      SiteSetting.edit_tags_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
+      restricted_tag = Fabricate(:tag)
+      Fabricate(:tag_group, permissions: { "staff" => 1 }, tags: [restricted_tag])
+
+      editable_ids =
+        DiscourseTagging.editable_synonym_ids(Tag.where(id: [tag1.id, restricted_tag.id]), guardian)
+
+      expect(editable_ids).to contain_exactly(tag1.id)
     end
   end
 

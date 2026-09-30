@@ -19,7 +19,7 @@ module PageObjects
 
       def open_browse
         mouseout
-        find("#{VISIBLE_DRAWER} .open-browse-page-btn").click
+        channels_index.open_browse
       end
 
       def close
@@ -30,6 +30,38 @@ module PageObjects
       def back
         mouseout
         find("#{VISIBLE_DRAWER} .c-navbar__back-button").click
+      end
+
+      def collapse
+        mouseout
+        find("#{VISIBLE_DRAWER} .c-navbar__toggle-drawer-button").click
+      end
+
+      def expand
+        mouseout
+        find(".chat-drawer:not(.is-expanded) .c-navbar").click
+      end
+
+      def toggle_button_width
+        page.evaluate_script(<<~JS)
+          document
+            .querySelector(".c-navbar__toggle-drawer-button")
+            .getBoundingClientRect().width
+        JS
+      end
+
+      # while collapsed the toggle button is only revealed to keyboard users
+      def focus_toggle_button
+        page.send_keys(:tab) # so the browser treats the next focus as keyboard driven
+        page.execute_script(<<~JS)
+          document
+            .querySelector(".chat-drawer:not(.is-expanded) .c-navbar__toggle-drawer-button")
+            .focus()
+        JS
+      end
+
+      def expand_with_keyboard
+        find(".c-navbar__toggle-drawer-button:focus").send_keys(:enter)
       end
 
       def visit_index
@@ -90,8 +122,8 @@ module PageObjects
         channels_index.has_no_channel?(channel)
       end
 
-      def has_no_browse_page_button?
-        channels_index.has_no_browse_page_button?
+      def has_no_channel_list_options_button?
+        channels_index.has_no_channel_list_options_button?
       end
 
       def has_channel_at_position?(channel, position)

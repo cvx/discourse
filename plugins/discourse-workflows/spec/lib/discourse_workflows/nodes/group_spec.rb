@@ -7,7 +7,7 @@ RSpec.describe DiscourseWorkflows::Nodes::Group::V1 do
   fab!(:group_2) { Fabricate(:group, name: "another_group") }
 
   describe ".load_options_context" do
-    def load_options(parameters: {}, filter: nil)
+    subject(:options) do
       context =
         DiscourseWorkflows::LoadOptionsContext.new(
           method_name: "groups",
@@ -19,9 +19,10 @@ RSpec.describe DiscourseWorkflows::Nodes::Group::V1 do
       described_class.load_options_context(context)
     end
 
-    it "returns groups for the chooser", :aggregate_failures do
-      options = load_options
+    let(:parameters) { {} }
+    let(:filter) { nil }
 
+    it "returns groups for the chooser", :aggregate_failures do
       expect(options).to include(
         { id: group.id, name: group.name },
         { id: group_2.id, name: group_2.name },
@@ -31,10 +32,12 @@ RSpec.describe DiscourseWorkflows::Nodes::Group::V1 do
       expect(option_ids).to include(*Group::AUTO_GROUPS.values)
     end
 
-    it "filters groups by the filter term" do
-      expect(load_options(filter: "another")).to contain_exactly(
-        { id: group_2.id, name: group_2.name },
-      )
+    context "with a filter term" do
+      let(:filter) { "another" }
+
+      it "filters groups" do
+        expect(options).to contain_exactly({ id: group_2.id, name: group_2.name })
+      end
     end
   end
 
@@ -131,6 +134,82 @@ RSpec.describe DiscourseWorkflows::Nodes::Group::V1 do
         expect { execute_node(configuration: config, item: item) }.to raise_error(
           Discourse::InvalidAccess,
         )
+      end
+
+      it "does not change the primary group by default" do
+        user.update!(primary_group: group_2)
+        group_2.add(user)
+
+        config = { "operation" => "add", "username" => user.username, "group_id" => group.id.to_s }
+
+        execute_node(configuration: config, item: item)
+
+        expect(user.reload.primary_group_id).to eq(group_2.id)
+      end
+
+      context "with set_primary_group" do
+        let(:config) do
+          {
+            "operation" => "add",
+            "username" => user.username,
+            "group_id" => group.id.to_s,
+            "set_primary_group" => true,
+          }
+        end
+
+        it "sets the group as the user's primary group", :aggregate_failures do
+          result = execute_node(configuration: config, item: item)
+
+          expect(user.reload.primary_group_id).to eq(group.id)
+          expect(GroupUser.exists?(user: user, group: group)).to be(true)
+          expect(result["user"]["id"]).to eq(user.id)
+          expect(result).to match_node_output_schema(described_class, configuration: config)
+        end
+
+        it "replaces an existing primary group and its title and flair", :aggregate_failures do
+          group_2.update!(title: "Old title")
+          group_2.add(user)
+          user.update!(primary_group: group_2, flair_group: group_2, title: "Old title")
+          group.update!(title: "New title")
+
+          execute_node(configuration: config, item: item)
+
+          user.reload
+          expect(user.primary_group_id).to eq(group.id)
+          expect(user.flair_group_id).to eq(group.id)
+          expect(user.title).to eq("New title")
+        end
+
+        it "agrees with a group that automatically becomes the primary group",
+           :aggregate_failures do
+          group_2.update!(title: "Old title")
+          group_2.add(user)
+          user.update!(primary_group: group_2, flair_group: group_2, title: "Old title")
+          group.update!(primary_group: true, title: "New title")
+
+          execute_node(configuration: config, item: item)
+
+          user.reload
+          expect(user.primary_group_id).to eq(group.id)
+          expect(user.flair_group_id).to eq(group.id)
+          expect(user.title).to eq("New title")
+        end
+
+        it "sets the primary group when the user is already a member" do
+          group.add(user)
+
+          execute_node(configuration: config, item: item)
+
+          expect(user.reload.primary_group_id).to eq(group.id)
+        end
+
+        it "resolves the value from an expression" do
+          config["set_primary_group"] = "={{ $json.make_primary }}"
+
+          execute_node(configuration: config, item: { "json" => { "make_primary" => true } })
+
+          expect(user.reload.primary_group_id).to eq(group.id)
+        end
       end
     end
 

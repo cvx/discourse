@@ -23,6 +23,9 @@ export interface DTooltipComponentArgs<Data = unknown> {
 
   /** The `@data` passed to the tooltip. */
   data?: Data;
+
+  /** Whether the tooltip is currently open — reflects the live instance state. */
+  expanded: boolean;
 }
 
 // The subset of arguments that mirror a tooltip's option bag. Built as a
@@ -102,9 +105,15 @@ export default class DTooltip<Data = unknown> extends Component<
   }
 
   get componentArgs(): DTooltipComponentArgs<Data> {
+    const instance = this.tooltipInstance;
     return {
       close: this.tooltip.close,
       data: this.options.data as Data,
+      // A getter (not a snapshot) so a consumer reading `expanded` subscribes to the
+      // live tracked state and re-renders on open/close, without churning this object.
+      get expanded() {
+        return instance.expanded;
+      },
     };
   }
 
@@ -118,17 +127,17 @@ export default class DTooltip<Data = unknown> extends Component<
 
   <template>
     <span
-      {{this.registerTrigger this.allowedProperties}}
+      aria-expanded={{if this.tooltipInstance.expanded "true" "false"}}
       class={{dConcatClass
         "fk-d-tooltip__trigger"
         (if this.tooltipInstance.expanded "-expanded")
       }}
-      role="button"
-      id={{this.tooltipInstance.id}}
       data-identifier={{this.options.identifier}}
       data-trigger
-      aria-expanded={{if this.tooltipInstance.expanded "true" "false"}}
+      id={{this.tooltipInstance.id}}
+      role="button"
       ...attributes
+      {{this.registerTrigger this.allowedProperties}}
     >
       <span class="fk-d-tooltip__trigger-container">
         {{~#if (has-block "trigger")~}}
@@ -146,15 +155,15 @@ export default class DTooltip<Data = unknown> extends Component<
       </span></span>
     {{~#if this.tooltipInstance.expanded~}}
       <DFloatBody
+        @inline={{this.options.inline}}
+        @innerClass="fk-d-tooltip__inner-content"
         @instance={{this.tooltipInstance}}
-        @trapTab={{and this.options.interactive this.options.trapTab}}
         @mainClass={{dConcatClass
           "fk-d-tooltip__content"
           (concat this.options.identifier "-content")
         }}
-        @innerClass="fk-d-tooltip__inner-content"
         @role="tooltip"
-        @inline={{this.options.inline}}
+        @trapTab={{and this.options.interactive this.options.trapTab}}
       >
         {{#if (has-block)}}
           {{yield this.componentArgs}}
@@ -162,8 +171,8 @@ export default class DTooltip<Data = unknown> extends Component<
           {{yield this.componentArgs to="content"}}
         {{else if this.options.component}}
           <this.options.component
-            @data={{this.options.data}}
             @close={{this.tooltipInstance.close}}
+            @data={{this.options.data}}
           />
         {{else if this.options.content}}
           {{this.options.content}}

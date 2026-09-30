@@ -34,18 +34,8 @@ module DiscourseWorkflows
           @topic = topic
         end
 
-        def valid?
-          @topic.present?
-        end
-
         def output
           { topic: topic_data(@topic) }
-        end
-
-        private
-
-        def topic_data(topic)
-          serialize_record(topic, TopicListItemSerializer)
         end
       end
     end

@@ -427,6 +427,19 @@ be:
     admin_onboarding_banner:
       start_posting:
         back: "Назад"
+    design_wizard:
+      back: "Назад"
+      next: "Далей"
+      sections:
+        theme: "Тэма"
+        homepage: "Галоўная старонка"
+        search: "Пошук"
+      colors:
+        light: "Светлая"
+        dark: "Цёмная"
+      homepage:
+        topics: "тэмы"
+        categories: "катэгорыі"
     about:
       edit: "Рэдагаваць гэту старонку"
       simple_title: "Пра сайт"
@@ -725,6 +738,9 @@ be:
         reviewable_ai_post:
           noun: "пост"
       user_label: "Карыстальнік"
+      author_penalty:
+        toast:
+          undo: "Адрабіць"
       notes:
         delete: "выдаляць"
       topic_label: "Тэма"
@@ -979,6 +995,12 @@ be:
       users: "Карыстальнікі"
       muted_users: "Адключаныя"
       apps: "Праграмы"
+      mcp_authorizations:
+        details: "Падрабязнасці"
+        never: "Ніколі"
+        status: "Статус"
+        statuses:
+          active: "Актыўныя"
       api_approved: "Ухвалена:"
       api_expires_never: "ніколі"
       theme: "Тэма"
@@ -1083,7 +1105,7 @@ be:
         default: "(Прадвызначаная)"
         any: "любая"
       homepage:
-        default: "(Прадвызначаная)"
+        default: "Прадвызначаная"
       password_confirmation:
         title: "Пароль яшчэ раз"
       auth_tokens:
@@ -1162,6 +1184,7 @@ be:
           staff_role_moderator: "запавольнік"
           email_placeholder: "name@example.com"
           invite_by_email: "Электронная пошта"
+          create_and_send: "Адправіць"
           summary:
             role_member: "Член"
             role_admin: "адміністратар"
@@ -1169,6 +1192,7 @@ be:
             method_email: "Электронная пошта"
             topic: "Тэма"
             groups: "Груп"
+            edit: "Рэдагаваць"
       password:
         title: "Пароль"
         common: "Гэты пароль занадта папулярны."
@@ -1334,6 +1358,12 @@ be:
       required_at_signup: "Абавязкова"
     welcome_banner_page_visibility:
       homepage: "Галоўная старонка"
+    shortcut_modifier_key:
+      option: "Варыянт"
+      delete: "Выдаліць"
+      home: "Галоўная старонка"
+    category_row:
+      subcategories: "+ Падкатэгорыі"
     select_kit:
       delete_item: "Выдаліць %{name}"
       components:
@@ -1346,6 +1376,8 @@ be:
       to: Да
     emoji_picker:
       flags: Сцягі
+    filter_controls:
+      reset: "Скінуць"
     composer:
       options: "Параметры"
       posting_not_on_topic: "У якой тэме вы хочаце адказаць?"
@@ -1437,6 +1469,7 @@ be:
       categories: "Катэгорыі"
       tags: "Тэгі"
       type:
+        default: "Допісаў"
         users: "Карыстальнікі"
         categories: "Катэгорыі"
       context:
@@ -1709,6 +1742,7 @@ be:
       color_placeholder: "Любы вэб-колер"
       delete_confirm: "Вы ўпэўнены, што хочаце выдаліць гэту катэгорыю?"
       delete_error: "Пры выдаленні катэгорыі адбылася памылка."
+      latest_topics: "Апошнія тэмы"
       description_expand: "Паказаць больш"
       description_collapse: "Паказаць менш"
       already_used: "Гэты колер ужо выкарыстоўваецца іншай катэгорыяй"
@@ -1795,6 +1829,7 @@ be:
     categories_list: "Спіс катэгорый"
     filters:
       filter:
+        reset: "скінуць"
         button:
           label: "Фільтр"
       latest:
@@ -1952,6 +1987,8 @@ be:
         custom:
           save: "Захаваць"
           delete: "Выдаліць"
+          localizations:
+            remove_language: "Выдаліць"
           links:
             add: "Дадаць яшчэ адну спасылку"
             delete: "Выдаліць спасылку"
@@ -2055,6 +2092,11 @@ be:
         group_traffic: "Трафік"
         group_members: "Члены"
         group_other: "Іншае"
+        related_items:
+          users:
+            title: "карыстальнікаў"
+          labels:
+            user: "Карыстальнік"
       config_sections:
         account:
           title: "Уліковы запіс"
@@ -2089,6 +2131,51 @@ be:
       config:
         developer:
           title: "Распрацоўшчык"
+        mcp:
+          tabs:
+            access: "Доступ"
+            activity: "актыўнасць"
+          overview:
+            status: "Статус"
+          access:
+            title: "Доступ"
+            group: "Група"
+            groups: "Груп"
+            actions: "Дзеянні"
+            edit: "Рэдагаваць"
+            delete: "Выдаліць"
+          primitives:
+            group_by_options:
+              kind: "Тып"
+            kind: "Тып"
+          clients:
+            actions: "Дзеянні"
+            block: "Заблакіраваць"
+          authorizations:
+            user: "Карыстальнік"
+            status: "Статус"
+            actions: "Дзеянні"
+          activity:
+            user: "Карыстальнік"
+          values:
+            server_status:
+              disabled: "Адключаныя"
+            client_trust:
+              approved: "Ухвалены"
+            authorization_status:
+              active: "Актыўныя"
+            activity_outcome:
+              success: "Поспех"
+              error: "памылка"
+            primitive_state:
+              disabled: "Адключаныя"
+            primitive_risk:
+              moderation: "Мадэрацыя"
+            filter:
+              all: "Усе"
+          never: "Ніколі"
+          actions:
+            revoke: "Адклікаць"
         emojis:
           title: "Эмодзі"
         flags:
@@ -2198,12 +2285,22 @@ be:
         default_value: "Прадвызначаная"
       search:
         title: "Пошук"
+      site_traffic_explorer:
+        metric_information: "Пра %{metric}"
+        apply: "Прымяніць"
+        view_more: "Паказаць больш"
+        cards:
+          visitors: "Наведвальнікі"
+        filters:
+          browser: "браўзэр"
+          ip: "IP-адрас"
+        series:
+          anonymous_human: "ананімны"
       dashboard:
         title: "Панэль кіравання"
         last_updated: "Панэль кіравання абноўлена:"
         version: "Версія"
         up_to_date: "У вас апошняя версія!"
-        critical_available: "Даступна крытычнае абнаўленне."
         updates_available: "Даступны абнаўленні."
         no_check_performed: "Праверка абнаўленняў не была выканана. Пераканайцеся, што Sidekiq працуе."
         stale_data: "Праверка абнаўленняў не праводзілася апошнім часам. Пераканайцеся, што Sidekiq працуе."
@@ -2242,8 +2339,9 @@ be:
               posts: "Допісы"
               share: "Абагуліць"
             whos_posting:
-              all_categories: "Усе катэгорыі"
               staff: "Персанал"
+              modal:
+                apply: "Захаваць"
             trust_level_pipeline:
               trust_levels:
                 "0": "Новы"
@@ -2256,6 +2354,10 @@ be:
             table:
               searches: "Пошукавых запытаў"
               status: "Статус"
+          system:
+            title: "сістэма"
+            status: "Статус"
+            dashboard_updated: "Панэль кіравання абноўлена"
         reports_section:
           modal:
             apply: "Прымяніць"
@@ -2263,6 +2365,7 @@ be:
           series:
             anonymous: "ананімны"
             crawlers: "Краўлеры пошукавых сістэм"
+          crawler_learn_more: "Даведацца больш"
         reports:
           today: "сёння"
           yesterday: "учора"
@@ -2277,6 +2380,17 @@ be:
           monthly: Штомесяц
           weekly: Штотыдзень
           groups: "Усе групы"
+          posters_by_member_type_members:
+            users_count:
+              one: "%{count} карыстальнік"
+              few: "%{count} карыстальнікі"
+              many: "%{count} карыстальнікаў"
+              other: "%{count} карыстальнікаў"
+            posts_count:
+              one: "%{count} допіс"
+              few: "%{count} допісы"
+              many: "%{count} допісаў"
+              other: "%{count} допісу"
           filters:
             group:
               label: Група
@@ -2866,10 +2980,10 @@ be:
           confirm: "пацвярджэнне"
           dropdown: "Выпадаючы спіс"
       site_text:
+        search_label: "Пошук"
+        theme_disabled: "Адключаныя"
         edit: "рэдагаваць"
-        revert: "Вярнуць змяненні"
         revert_confirm: "Ці ўпэўненыя вы, што хочаце вярнуць вашы змены?"
-        go_back: "Вярнуцца да пошуку"
         show_overriden: "Паказваць толькі перавызначаны"
       settings:
         show_overriden: "Паказваць толькі перавызначаны"
@@ -2965,6 +3079,7 @@ be:
         delete: "выдаляць"
         name: "Імя"
         group: "Група"
+        all_groups: "Усе групы"
         image: "Выява"
         settings: "Налады"
         export: "Экспарт"

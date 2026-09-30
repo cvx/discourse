@@ -13,6 +13,7 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
           setting_name:,
           admin_user_ids:,
           changes_already_notified_about_promotion:,
+          changes_already_promoted:,
         },
         guardian: Discourse.system_user.guardian,
       )
@@ -24,6 +25,7 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
     let(:setting_name) { :enable_upload_debug_mode }
     let(:admin_user_ids) { [admin.id, admin_2.id] }
     let(:changes_already_notified_about_promotion) { [] }
+    let(:changes_already_promoted) { [] }
     let(:setting_status) { :stable }
 
     before do
@@ -103,10 +105,78 @@ RSpec.describe UpcomingChanges::NotifyPromotion do
       end
     end
 
-    context "when change has already been notified about promotion" do
+    context "when the change dependencies are not met" do
+      let(:setting_name) { :set_locale_from_cookie }
+
+      before do
+        SiteSetting.allow_user_locale = false
+        mock_upcoming_change_metadata(
+          set_locale_from_cookie: {
+            impact: "feature,all_members",
+            status: :stable,
+          },
+        )
+      end
+
+      it { is_expected.to fail_a_policy(:change_dependencies_met) }
+
+      it "does not notify admins, record a promotion, or trigger an enabled event" do
+        events = nil
+
+        expect {
+          events = DiscourseEvent.track_events(:upcoming_change_enabled) { result }
+        }.to not_change { Notification.count }.and(not_change { UpcomingChangeEvent.count }).and(
+          not_change { UserHistory.count },
+        )
+
+        expect(events).to be_empty
+      end
+    end
+
+    context "when the change has already been promoted" do
+      let(:changes_already_promoted) { [:enable_upload_debug_mode] }
+
+      it { is_expected.to fail_a_policy(:promotion_not_already_handled) }
+    end
+
+    context "when the change has already been notified about, but not yet promoted" do
       let(:changes_already_notified_about_promotion) { [:enable_upload_debug_mode] }
 
-      it { is_expected.to fail_a_policy(:change_has_not_already_been_notified_about_promotion) }
+      it { is_expected.to run_successfully }
+
+      it "does not notify admins" do
+        expect { result }.not_to change {
+          Notification.where(
+            notification_type: Notification.types[:upcoming_change_automatically_promoted],
+          ).count
+        }
+      end
+
+      it "does not record that admins were notified" do
+        expect { result }.not_to change {
+          UpcomingChangeEvent.where(
+            event_type: :admins_notified_automatic_promotion,
+            upcoming_change_name: :enable_upload_debug_mode,
+          ).count
+        }
+      end
+
+      it "still promotes the change for real" do
+        events = DiscourseEvent.track_events { result }
+
+        expect(
+          events.select do |e|
+            e[:event_name] == :upcoming_change_enabled &&
+              e[:params].first == :enable_upload_debug_mode
+          end,
+        ).to be_present
+        expect(
+          UpcomingChangeEvent.exists?(
+            event_type: :automatically_promoted,
+            upcoming_change_name: :enable_upload_debug_mode,
+          ),
+        ).to eq(true)
+      end
     end
 
     context "when admin has manually opted out" do

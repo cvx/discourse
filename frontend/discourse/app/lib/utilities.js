@@ -8,6 +8,7 @@ import discourseLater from "discourse/lib/later";
 import { processSelectionFragment } from "discourse/lib/selection/preserve-list-structure";
 import { parseAsync } from "discourse/lib/text";
 import toMarkdown from "discourse/lib/to-markdown";
+import Site from "discourse/models/site";
 import { capabilities } from "discourse/services/capabilities";
 import { i18n } from "discourse-i18n";
 
@@ -279,11 +280,21 @@ export function setCaretPosition(ctrl, pos) {
   }
 }
 
+export function siteDefaultHomepage(siteSettings) {
+  const configured = siteSettings.default_homepage;
+
+  const choices = Site.current()?.homepage_choices;
+  if (configured && (!choices || choices.includes(configured))) {
+    return configured;
+  }
+
+  return siteSettings.top_menu.split("|")[0].split(",")[0];
+}
+
 export function initializeDefaultHomepage(siteSettings) {
   const sel = document.querySelector("meta[name='discourse_current_homepage']");
   const homepage =
-    sel?.getAttribute("content") ||
-    siteSettings.top_menu.split("|")[0].split(",")[0];
+    sel?.getAttribute("content") || siteDefaultHomepage(siteSettings);
   setDefaultHomepage(homepage);
 }
 
@@ -523,7 +534,22 @@ export async function inCodeBlock(text, pos) {
   return CODE_TOKEN_TYPES.includes(type);
 }
 
+/**
+ * Replaces modifier names in a shortcut string with their platform spelling.
+ *
+ * @deprecated To draw a shortcut use `DShortcut` (`discourse/ui-kit/d-shortcut`),
+ * which carries the accessible markup too. For the string alone use
+ * `formatShortcut` from `discourse/lib/shortcut-format`.
+ */
 export function translateModKey(string, separator = " ") {
+  deprecated(
+    "`translateModKey()` is deprecated. To draw a shortcut use `DShortcut` (`discourse/ui-kit/d-shortcut`), which carries the accessible markup too; for the string alone use `formatShortcut()` from `discourse/lib/shortcut-format`.",
+    {
+      since: "2026.9.0",
+      id: "discourse.translate-mod-key",
+    }
+  );
+
   const { isApple } = capabilities;
   // Apple device users are used to glyphs for shortcut keys
   if (isApple) {
@@ -699,11 +725,15 @@ export function getCaretPosition(element, options) {
  * @return {String} Markdown table
  */
 export function arrayToTable(array, cols, colPrefix = "col", alignments) {
+  const escapeCell = (value) =>
+    String(value ?? "")
+      .replace(/\r?\n|\r/g, " ")
+      .replaceAll("|", "\\|");
+
   let table = "";
 
-  // Generate table headers
   table += "|";
-  table += cols.join(" | ");
+  table += cols.map(escapeCell).join(" | ");
   table += "|\n|";
 
   const alignMap = {
@@ -724,11 +754,7 @@ export function arrayToTable(array, cols, colPrefix = "col", alignments) {
 
     table +=
       cols
-        .map(function (_key, index) {
-          return String(item[`${colPrefix}${index}`] || "")
-            .replace(/\r?\n|\r/g, " ")
-            .replaceAll("|", "\\|");
-        })
+        .map((_key, index) => escapeCell(item[`${colPrefix}${index}`]))
         .join(" | ") + "|\n";
   });
 

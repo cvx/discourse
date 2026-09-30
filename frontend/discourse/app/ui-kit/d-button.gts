@@ -21,7 +21,7 @@ type DButtonAction = DButtonActionCallback | DButtonActionObject;
 
 type RouteModel = string | number | object;
 
-interface DButtonSignature {
+export interface DButtonSignature {
   Args: {
     // Text
     title?: string;
@@ -69,7 +69,7 @@ interface DButtonSignature {
     class?: string;
   };
 
-  Element: HTMLButtonElement;
+  Element: HTMLButtonElement | HTMLAnchorElement;
 
   // Optional yield
   Blocks: {
@@ -104,7 +104,7 @@ export default class DButton extends Component<DButtonSignature> {
     return this.forceDisabled || this.args.disabled;
   }
 
-  get btnType() {
+  get btnContentClass() {
     if (this.args.icon) {
       return this.computedLabel ? "btn-icon-text" : "btn-icon";
     }
@@ -149,6 +149,10 @@ export default class DButton extends Component<DButtonSignature> {
     if (this.args.ariaPressed === false) {
       return "false";
     }
+  }
+
+  get wrapperElement() {
+    return dElement(this.args.href ? "a" : "button");
   }
 
   @action
@@ -234,33 +238,29 @@ export default class DButton extends Component<DButtonSignature> {
     }
   }
 
-  get wrapperElement() {
-    return dElement(this.args.href ? "a" : "button");
-  }
-
   <template>
     {{! eslint-disable ember/template-no-pointer-down-event-binding }}
     <this.wrapperElement
-      href={{@href}}
-      type={{unless @href (or @type "button")}}
+      aria-controls={{@ariaControls}}
+      aria-expanded={{this.computedAriaExpanded}}
+      aria-label={{this.computedAriaLabel}}
+      aria-pressed={{this.computedAriaPressed}}
       {{! For legacy compatibility. Prefer passing class as attributes. }}
       class={{dConcatClass
         @class
         (if @isLoading "is-loading")
         (if this.btnLink "btn-link" "btn")
         (if this.noText "no-text")
-        this.btnType
+        this.btnContentClass
       }}
+      disabled={{this.isDisabled}}
+      form={{@form}}
+      href={{@href}}
       {{! For legacy compatibility. Prefer passing these as html attributes. }}
       id={{@id}}
-      form={{@form}}
-      aria-controls={{@ariaControls}}
-      aria-expanded={{this.computedAriaExpanded}}
-      aria-pressed={{this.computedAriaPressed}}
       tabindex={{@tabindex}}
-      disabled={{this.isDisabled}}
       title={{this.computedTitle}}
-      aria-label={{this.computedAriaLabel}}
+      type={{unless @href (or @type "button")}}
       ...attributes
       {{on "keydown" this.keyDown}}
       {{on "click" this.click}}

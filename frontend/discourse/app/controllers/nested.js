@@ -225,29 +225,6 @@ export default class NestedController extends Controller {
     return this.#topicController.mergePosts();
   }
 
-  #visiblePostIdsBelow(post) {
-    const viewSelector = this.contextMode
-      ? ".nested-context-view"
-      : ".nested-view:not(.nested-context-view)";
-    const view = document.querySelector(viewSelector);
-    if (!view) {
-      return [post.id];
-    }
-
-    const postIds = Array.from(
-      view.querySelectorAll("article[data-post-id]")
-    ).map((element) => Number(element.dataset.postId));
-    const index = postIds.indexOf(post.id);
-
-    return index === -1 ? [post.id] : postIds.slice(index);
-  }
-
-  #nestedSelectablePostIds() {
-    return (this.topic?.postStream?.posts || [])
-      .map((post) => post.id)
-      .filter((id) => id != null);
-  }
-
   @action
   async loadMoreRoots() {
     if (this.loadingMore || !this.hasMoreRoots) {
@@ -292,26 +269,6 @@ export default class NestedController extends Controller {
       if (shouldScrollToRoots) {
         schedule("afterRender", this, this.#scrollToRoots);
       }
-    });
-  }
-
-  #scrollToRoots() {
-    const roots = document.querySelector(
-      ".nested-view:not(.nested-context-view) > .nested-view__roots"
-    );
-
-    if (!roots) {
-      return;
-    }
-
-    const controls = document.querySelector(
-      ".nested-view:not(.nested-context-view) > .nested-view__controls"
-    );
-    const controlsHeight = controls?.offsetHeight || 0;
-    const rect = roots.getBoundingClientRect();
-
-    window.scrollTo({
-      top: window.scrollY + rect.top - headerOffset() - controlsHeight,
     });
   }
 
@@ -399,25 +356,6 @@ export default class NestedController extends Controller {
     }
   }
 
-  #cacheKey() {
-    return this.nestedViewCache.buildKey(this.topic.id, {
-      sort: this.sort,
-      post_number: this.postNumber,
-      context: this.context ?? undefined,
-    });
-  }
-
-  #saveScrollAnchorToSession(cacheKey, scrollAnchor) {
-    try {
-      sessionStorage.setItem(
-        `nested-view-scroll:${cacheKey}`,
-        JSON.stringify(scrollAnchor)
-      );
-    } catch {
-      // Ignore storage failures; in-memory scroll restoration still works.
-    }
-  }
-
   @action
   viewParentContext() {
     this.saveToCache();
@@ -467,8 +405,8 @@ export default class NestedController extends Controller {
   }
 
   @action
-  editPost(post) {
-    this.#topicController.editPost(post);
+  async editPost(post) {
+    await this.#topicController.editPost(post);
     this.composer.set("skipJumpOnSave", true);
   }
 
@@ -545,23 +483,6 @@ export default class NestedController extends Controller {
     return tc.buildQuoteMarkdown();
   }
 
-  #ensurePostInStream(postId) {
-    const postStream = this.topic?.postStream;
-    if (!postStream) {
-      return;
-    }
-
-    const id = parseInt(postId, 10);
-    if (!postStream.findLoadedPost(id)) {
-      for (const post of this.postRegistry.values()) {
-        if (post.id === id) {
-          registerPostInTopicPostStream(this.topic, post);
-          break;
-        }
-      }
-    }
-  }
-
   @action
   showHistory(post) {
     this.#topicRoute.showHistory(post);
@@ -630,7 +551,7 @@ export default class NestedController extends Controller {
   @action
   showActivityLog() {
     this.modal.show(NestedActivityLog, {
-      model: { topic: this.topic },
+      model: { topic: this.topic, editPost: this.editPost },
     });
   }
 
@@ -731,6 +652,132 @@ export default class NestedController extends Controller {
     this.postRegistry.clear();
   }
 
+  @action
+  async loadNewRoots() {
+    if (this.contextMode) {
+      this.newRootPostIds = [];
+      return;
+    }
+
+    const ids = [...this.newRootPostIds];
+    this.newRootPostIds = [];
+
+    const topicId = this.topic?.id;
+    const results = await Promise.allSettled(
+      ids.map((id) => ajax(`/posts/${id}.json`))
+    );
+
+    if (this.topic?.id !== topicId) {
+      return;
+    }
+
+    const newNodes = [];
+    for (const result of results) {
+      if (
+        result.status === "fulfilled" &&
+        this.#postBelongsToTopic(result.value, topicId)
+      ) {
+        newNodes.push(this.#processNode({ ...result.value, children: [] }));
+      }
+    }
+
+    if (newNodes.length > 0) {
+      this.rootNodes = [...newNodes, ...this.rootNodes];
+    }
+  }
+
+  readPosts(topicId, postNumbers) {
+    if (this.topic?.id !== topicId) {
+      return;
+    }
+
+    for (const postNumber of postNumbers) {
+      const post = this.postRegistry.get(postNumber);
+      if (post && !post.read) {
+        post.set("read", true);
+      }
+    }
+  }
+
+  #visiblePostIdsBelow(post) {
+    const viewSelector = this.contextMode
+      ? ".nested-context-view"
+      : ".nested-view:not(.nested-context-view)";
+    const view = document.querySelector(viewSelector);
+    if (!view) {
+      return [post.id];
+    }
+
+    const postIds = Array.from(
+      view.querySelectorAll("article[data-post-id]")
+    ).map((element) => Number(element.dataset.postId));
+    const index = postIds.indexOf(post.id);
+
+    return index === -1 ? [post.id] : postIds.slice(index);
+  }
+
+  #nestedSelectablePostIds() {
+    return (this.topic?.postStream?.posts || [])
+      .map((post) => post.id)
+      .filter((id) => id != null);
+  }
+
+  #scrollToRoots() {
+    const roots = document.querySelector(
+      ".nested-view:not(.nested-context-view) > .nested-view__roots"
+    );
+
+    if (!roots) {
+      return;
+    }
+
+    const controls = document.querySelector(
+      ".nested-view:not(.nested-context-view) > .nested-view__controls"
+    );
+    const controlsHeight = controls?.offsetHeight || 0;
+    const rect = roots.getBoundingClientRect();
+
+    window.scrollTo({
+      top: window.scrollY + rect.top - headerOffset() - controlsHeight,
+    });
+  }
+
+  #cacheKey() {
+    return this.nestedViewCache.buildKey(this.topic.id, {
+      sort: this.sort,
+      post_number: this.postNumber,
+      context: this.context ?? undefined,
+    });
+  }
+
+  #saveScrollAnchorToSession(cacheKey, scrollAnchor) {
+    try {
+      sessionStorage.setItem(
+        `nested-view-scroll:${cacheKey}`,
+        JSON.stringify(scrollAnchor)
+      );
+    } catch {
+      // Ignore storage failures; in-memory scroll restoration still works.
+    }
+  }
+
+  #ensurePostInStream(postId) {
+    const postStream = this.topic?.postStream;
+    if (!postStream) {
+      return;
+    }
+
+    const id = parseInt(postId, 10);
+    if (!postStream.findLoadedPost(id)) {
+      for (const post of this.postRegistry.values()) {
+        if (post.id === id) {
+          registerPostInTopicPostStream(this.topic, post);
+          break;
+        }
+      }
+    }
+  }
+
   #onPostRegistered(post) {
     const topicId = this.topic?.id;
     if (
@@ -756,26 +803,6 @@ export default class NestedController extends Controller {
     this.scrollAnchor = null;
   }
 
-  @bind
-  _onMessage(data, globalId, messageId) {
-    if (messageId != null) {
-      this.messageBusLastId = messageId;
-    }
-
-    switch (data.type) {
-      case "created":
-        this.#handleCreated(data);
-        break;
-      case "revised":
-      case "rebaked":
-      case "deleted":
-      case "recovered":
-      case "acted":
-        this.#handlePostChanged(data);
-        break;
-    }
-  }
-
   async #handleCreated(data) {
     // Skip if this post is already known (e.g. cache restore replaying
     // messages that were already processed before navigating away)
@@ -787,7 +814,15 @@ export default class NestedController extends Controller {
     const topicId = this.topic?.id;
     try {
       const postData = await ajax(`/posts/${data.id}.json`);
-      if (this.topic?.id !== topicId) {
+      if (
+        this.topic?.id !== topicId ||
+        !this.#postBelongsToTopic(postData, topicId)
+      ) {
+        return;
+      }
+
+      if (this.#isActivityLogPost(postData)) {
+        this.#notifyActivityChanged(data);
         return;
       }
 
@@ -829,14 +864,33 @@ export default class NestedController extends Controller {
   // small_action posts (close/open/etc.) belong in the activity log, not the tree;
   // whispers with an action_code (e.g. assigns) are likewise activity-log-only.
   #isVisibleInTree(postData) {
+    return !this.#isActivityLogPost(postData);
+  }
+
+  #isActivityLogPost(postData) {
     const postTypes = this.site.post_types;
     if (postData.post_type === postTypes.small_action) {
-      return false;
+      return true;
     }
     if (postData.post_type === postTypes.whisper && postData.action_code) {
-      return false;
+      return true;
     }
-    return true;
+    return false;
+  }
+
+  #notifyActivityChanged(data) {
+    const topicId = this.topic?.id;
+    if (topicId) {
+      this.topic = this.store.createRecord("topic", {
+        id: topicId,
+        has_activity_log: true,
+      });
+    }
+    this.appEvents.trigger("nested-replies:activity-changed", {
+      topicId,
+      postId: data.id,
+      type: data.type,
+    });
   }
 
   #visibleParentPostNumber(postData) {
@@ -861,6 +915,13 @@ export default class NestedController extends Controller {
     return ancestors.length > maxDepth ? ancestors[maxDepth - 1] : replyTo;
   }
 
+  #postBelongsToTopic(postData, topicId = this.topic?.id) {
+    return (
+      postData?.topic_id != null &&
+      String(postData.topic_id) === String(topicId)
+    );
+  }
+
   #isPostKnown(postId) {
     if (this.rootNodes.some((n) => n.post.id === postId)) {
       return true;
@@ -878,6 +939,9 @@ export default class NestedController extends Controller {
 
   async #handlePostChanged(data) {
     if (data.type === "deleted") {
+      if (this.topic?.has_activity_log) {
+        this.#notifyActivityChanged(data);
+      }
       this.#markPostDeletedLocally(data.id);
       return;
     }
@@ -885,7 +949,15 @@ export default class NestedController extends Controller {
     const topicId = this.topic?.id;
     try {
       const postData = await ajax(`/posts/${data.id}.json`);
-      if (this.topic?.id !== topicId) {
+      if (
+        this.topic?.id !== topicId ||
+        !this.#postBelongsToTopic(postData, topicId)
+      ) {
+        return;
+      }
+
+      if (this.#isActivityLogPost(postData)) {
+        this.#notifyActivityChanged(data);
         return;
       }
 
@@ -922,50 +994,6 @@ export default class NestedController extends Controller {
     }
   }
 
-  @action
-  async loadNewRoots() {
-    if (this.contextMode) {
-      this.newRootPostIds = [];
-      return;
-    }
-
-    const ids = [...this.newRootPostIds];
-    this.newRootPostIds = [];
-
-    const topicId = this.topic?.id;
-    const results = await Promise.allSettled(
-      ids.map((id) => ajax(`/posts/${id}.json`))
-    );
-
-    if (this.topic?.id !== topicId) {
-      return;
-    }
-
-    const newNodes = [];
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        newNodes.push(this.#processNode({ ...result.value, children: [] }));
-      }
-    }
-
-    if (newNodes.length > 0) {
-      this.rootNodes = [...newNodes, ...this.rootNodes];
-    }
-  }
-
-  readPosts(topicId, postNumbers) {
-    if (this.topic?.id !== topicId) {
-      return;
-    }
-
-    for (const postNumber of postNumbers) {
-      const post = this.postRegistry.get(postNumber);
-      if (post && !post.read) {
-        post.set("read", true);
-      }
-    }
-  }
-
   #processNode(nodeData) {
     return processNode(this.store, this.topic, nodeData);
   }
@@ -985,6 +1013,26 @@ export default class NestedController extends Controller {
     }
     if (data.suggested_group_name !== undefined) {
       this.topic.suggested_group_name = data.suggested_group_name;
+    }
+  }
+
+  @bind
+  _onMessage(data, globalId, messageId) {
+    if (messageId != null) {
+      this.messageBusLastId = messageId;
+    }
+
+    switch (data.type) {
+      case "created":
+        this.#handleCreated(data);
+        break;
+      case "revised":
+      case "rebaked":
+      case "deleted":
+      case "recovered":
+      case "acted":
+        this.#handlePostChanged(data);
+        break;
     }
   }
 }

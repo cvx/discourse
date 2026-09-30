@@ -10,12 +10,13 @@ th:
       dashboard:
         sections:
           support:
-            filter:
-              all_categories: "หมวดหมู่ทั้งหมด"
             answerers:
               staff: "ทีมงาน"
               member: "สมาชิก"
   js:
+    discourse_workflows:
+      solution_changed:
+        tag_names: "ป้าย"
     notifications:
       alt:
         solved:
@@ -40,6 +41,12 @@ th:
       confirm_solved_removal_cancel: "ยกเลิก"
       shared_issue:
         label_with_count: "%{label} (%{count})"
+    admin:
+      reports:
+        related_items:
+          labels:
+            topic: "หัวข้อ"
+            category: "หมวดหมู่"
     discourse_automation:
       triggerables:
         first_accepted_solution:

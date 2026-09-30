@@ -114,7 +114,7 @@ module Discourse
         next if File.symlink?(destination) && File.readlink(destination) == source
 
         temp_destination = Rails.root.join("tmp", SecureRandom.hex).to_s
-        execute_command("ln", "-s", source, temp_destination)
+        File.symlink(source, temp_destination)
 
         begin
           File.rename(temp_destination, destination)
@@ -164,6 +164,7 @@ module Discourse
         failure_message: "",
         success_status_codes: [0],
         chdir: ".",
+        unsetenv_others: false,
         unsafe_shell: false
       )
         env = nil
@@ -183,7 +184,10 @@ module Discourse
 
         args = command
         args = [env] + command if env
-        stdout, stderr, status = Open3.capture3(*args, chdir: chdir)
+
+        spawn_options = { chdir: chdir }
+        spawn_options[:unsetenv_others] = true if unsetenv_others
+        stdout, stderr, status = Open3.capture3(*args, **spawn_options)
 
         if !status.exited? || !success_status_codes.include?(status.exitstatus)
           message = [command.join(" "), failure_message, stderr].filter(&:present?).join("\n")
@@ -327,6 +331,11 @@ module Discourse
   class ReadOnly < StandardError
   end
 
+  # Raised when the site is archived (site_archived setting) and a write is
+  # attempted from an action not declared with `allow_when_archived`.
+  class SiteArchived < StandardError
+  end
+
   # Cross site request forgery
   class CSRF < StandardError
   end
@@ -346,6 +355,12 @@ module Discourse
 
   def self.anonymous_filters
     @anonymous_filters ||= %i[latest top categories hot]
+  end
+
+  # `anonymous_filters` also holds menu items such as `categories`, which have no
+  # `/l/<filter>` route. Not memoized: plugins push onto both lists at load time.
+  def self.anonymous_list_filters
+    Discourse.filters & Discourse.anonymous_filters
   end
 
   def self.top_menu_items
@@ -485,6 +500,8 @@ module Discourse
 
     plugins = apply_asset_filters(plugins, :js, args[:request])
 
+    request_path = args[:request]&.path&.delete_prefix(Discourse.base_path)&.delete_prefix("/")
+
     assets = []
 
     plugins.each do |plugin|
@@ -498,6 +515,8 @@ module Discourse
             importmap_name: "discourse/plugins/#{plugin.name}",
             external_plugin_imports:
               Plugin::JsManager.external_plugin_imports(plugin.directory_name, "main"),
+            route_bundle:
+              Plugin::JsManager.route_bundle_for_path(plugin.directory_name, "main", request_path),
           }
         end
       end
@@ -520,6 +539,8 @@ module Discourse
             type_module: true,
             external_plugin_imports:
               Plugin::JsManager.external_plugin_imports(plugin.directory_name, "admin"),
+            route_bundle:
+              Plugin::JsManager.route_bundle_for_path(plugin.directory_name, "admin", request_path),
           }
         end
       end
@@ -830,6 +851,11 @@ module Discourse
 
             @mutex.synchronize do
               @dbs.each do |db|
+                if !RailsMultisite::ConnectionManagement.has_db?(db)
+                  @dbs.delete(db)
+                  next
+                end
+
                 RailsMultisite::ConnectionManagement.with_connection(db) do
                   @dbs.delete(db) if !Discourse.redis.expire(key, ttl)
                 end
@@ -979,6 +1005,11 @@ module Discourse
     user ||= system_user || User.admins.real.order(:id).first
   end
 
+  # A global override bypasses the write-time name-to-id conversion.
+  def self.site_contact_group
+    Group.find_by_id_or_name(SiteSetting.site_contact_group_name)
+  end
+
   SYSTEM_USER_ID = -1
 
   def self.system_user
@@ -1021,15 +1052,14 @@ module Discourse
   # before forking, otherwise the forked process might
   # be in a bad state
   def self.before_fork
+    DiscourseVips.before_fork
+
     if GlobalSetting.mini_racer_single_threaded
       ObjectSpace.each_object(MiniRacer::Context) { |c| c.low_memory_notification }
     else
       # V8 does not support forking, make sure all contexts are disposed
       ObjectSpace.each_object(MiniRacer::Context) { |c| c.dispose }
     end
-
-    # get rid of rubbish so we don't share it
-    Process.warmup
   end
 
   # Called in web worker processes after fork to apply worker-specific
@@ -1060,6 +1090,8 @@ module Discourse
   # after fork, otherwise Discourse will be
   # in a bad state
   def self.after_fork
+    Demon::DiscourseVips.release_inherited_worker if defined?(Demon::DiscourseVips)
+
     # note: some of this reconnecting may no longer be needed per https://github.com/redis/redis-rb/pull/414
     MessageBus.after_fork
     SiteSetting.after_fork
@@ -1301,7 +1333,10 @@ module Discourse
         require "actionview_precompiler"
         ActionviewPrecompiler.precompile
       end,
-      Thread.new { LetterAvatar.image_magick_version },
+      Thread.new do
+        LetterAvatar.version
+        LetterAvatar.cleanup_old
+      end,
       Thread.new { SvgSprite.core_svgs },
       Thread.new { EmberAssets.script_chunks(exception: false) },
       Thread.new do
@@ -1346,10 +1381,24 @@ module Discourse
 
   def self.anonymous_locale(request)
     locale = request.params[LOCALE_PARAM] if SiteSetting.set_locale_from_param
-    locale ||= request.cookies["locale"] if SiteSetting.set_locale_from_cookie
+    locale ||= locale_from_cookie(request)
     locale ||=
       request.env["HTTP_ACCEPT_LANGUAGE"] if SiteSetting.set_locale_from_accept_language_header
     HttpLanguageParser.parse(locale)
+  end
+
+  def self.locale_from_cookie(request)
+    cookie = request.cookies["locale"]
+    return if cookie.blank?
+    return cookie if SiteSetting.set_locale_from_cookie
+
+    # The language switcher writes this cookie, so reading it back needs no separate opt-in.
+    # Restricted to the configured locales so anonymous cache variance stays bounded by the
+    # site's own locale list rather than every available locale.
+    if ContentLocalization.language_switcher_enabled? &&
+         SiteSetting.content_localization_locales.include?(cookie)
+      cookie
+    end
   end
 
   # For test environment only

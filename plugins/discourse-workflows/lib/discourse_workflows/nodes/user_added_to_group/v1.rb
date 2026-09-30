@@ -12,7 +12,7 @@ module DiscourseWorkflows
             color: "teal",
           },
           group: "discourse_triggers",
-          events: [:user_added_to_group],
+          event: :user_added_to_group,
           output_contracts: [{ schema: Schema::USER_ADDED_TO_GROUP_SCHEMA }],
           properties: {
             group_id: {
@@ -29,7 +29,6 @@ module DiscourseWorkflows
                 value_property: "id",
                 name_property: "name",
                 filterable: true,
-                none: "discourse_workflows.user_added_to_group.group_id_placeholder",
               },
             },
           },

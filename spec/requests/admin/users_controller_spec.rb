@@ -20,6 +20,21 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body).to be_present
       end
 
+      it "loads second-factor status in batches" do
+        Fabricate(:user_second_factor_totp, user: user)
+        Fabricate(:user_security_key, user: coding_horror)
+        Fabricate(:passkey_with_random_credential, user: moderator)
+
+        queries = track_sql_queries { get "/admin/users/list/active.json" }
+
+        users_by_id = response.parsed_body.index_by { |serialized_user| serialized_user["id"] }
+        expect(users_by_id[user.id]["second_factor_enabled"]).to eq(true)
+        expect(users_by_id[coding_horror.id]["second_factor_enabled"]).to eq(true)
+        expect(users_by_id[moderator.id]).not_to have_key("second_factor_enabled")
+        expect(queries.count { |query| query.include?('FROM "user_second_factors"') }).to eq(1)
+        expect(queries.count { |query| query.include?('FROM "user_security_keys"') }).to eq(1)
+      end
+
       it "returns silence reason when user is silenced" do
         silencer =
           UserSilencer.new(
@@ -287,6 +302,28 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body["id"]).to eq(user.id)
       end
 
+      it "returns SSO details when moderators can view them" do
+        sso_record =
+          Fabricate(:single_sign_on_record, user: user, external_id: "discourse_connect_user")
+        SiteSetting.moderators_view_sso_details = true
+
+        get "/admin/users/#{user.id}.json"
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body.dig("single_sign_on_record", "external_id")).to eq(
+          sso_record.external_id,
+        )
+      end
+
+      it "hides SSO details by default" do
+        Fabricate(:single_sign_on_record, user: user)
+
+        get "/admin/users/#{user.id}.json"
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body).not_to have_key("single_sign_on_record")
+      end
+
       it "includes count of similar users" do
         Fabricate(:user, ip_address: "88.88.88.88")
         Fabricate(:admin, ip_address: user.ip_address)
@@ -433,6 +470,18 @@ RSpec.describe Admin::UsersController do
         expect(response.status).to eq(200)
         evil_trout.reload
         expect(evil_trout.approved).to eq(true)
+      end
+
+      it "approves a user whose previous reviewable was rejected" do
+        evil_trout.update!(active: true)
+        reviewable =
+          Fabricate(:reviewable_user, target: evil_trout, status: Reviewable.statuses[:rejected])
+
+        put "/admin/users/approve-bulk.json", params: { users: [evil_trout.id] }
+
+        expect(response.status).to eq(200)
+        expect(evil_trout.reload).to be_approved
+        expect(reviewable.reload).to be_approved
       end
     end
 
@@ -642,7 +691,7 @@ RSpec.describe Admin::UsersController do
           expect(response.status).to eq(200)
         end
 
-        it "won't delete a category topic" do
+        it "preserves category topics" do
           c = Fabricate(:category_with_definition)
           cat_post = c.topic.posts.first
           put(
@@ -654,7 +703,7 @@ RSpec.describe Admin::UsersController do
           expect(response.status).to eq(200)
         end
 
-        it "won't delete a category topic by replies" do
+        it "preserves category topics when deleting replies" do
           c = Fabricate(:category_with_definition)
           cat_post = c.topic.posts.first
           put(
@@ -1288,6 +1337,33 @@ RSpec.describe Admin::UsersController do
         before { SiteSetting.moderators_change_trust_levels = true }
 
         include_examples "trust level updates possible"
+
+        it "prevents changing or locking a staff user's trust level" do
+          another_admin.update!(trust_level: TrustLevel[4], manual_locked_trust_level: nil)
+
+          put "/admin/users/#{another_admin.id}/trust_level.json", params: { level: TrustLevel[0] }
+
+          trust_level_status = response.status
+          trust_level_errors = response.parsed_body["errors"]
+          trust_level = another_admin.reload.trust_level
+
+          another_admin.update!(trust_level: TrustLevel[4], manual_locked_trust_level: nil)
+
+          put "/admin/users/#{another_admin.id}/trust_level_lock.json", params: { locked: "true" }
+
+          trust_level_lock_status = response.status
+          trust_level_lock_errors = response.parsed_body["errors"] if response.body.present?
+          manual_locked_trust_level = another_admin.reload.manual_locked_trust_level
+
+          aggregate_failures do
+            expect(trust_level_status).to eq(422)
+            expect(trust_level_errors).to be_present
+            expect(trust_level).to eq(TrustLevel[4])
+            expect(trust_level_lock_status).to eq(403)
+            expect(trust_level_lock_errors).to be_present
+            expect(manual_locked_trust_level).to eq(nil)
+          end
+        end
       end
 
       context "when moderators_change_trust_levels setting is disabled" do
@@ -1707,6 +1783,16 @@ RSpec.describe Admin::UsersController do
       before { sign_in(moderator) }
 
       include_examples "user deletion possible"
+
+      it "prevents deleting another moderator" do
+        target_moderator = Fabricate(:moderator)
+
+        delete "/admin/users/#{target_moderator.id}.json"
+
+        expect(User.exists?(target_moderator.id)).to eq(true)
+        expect(response).to be_forbidden
+        expect(response.parsed_body["errors"]).to include(I18n.t("invalid_access"))
+      end
     end
 
     context "when logged in as a non-staff user" do
@@ -1964,7 +2050,7 @@ RSpec.describe Admin::UsersController do
         expect(reg_user.active).to eq(true)
       end
 
-      it "should confirm email even when the tokens are expired" do
+      it "confirms email even when the tokens are expired" do
         reg_user.email_tokens.update_all(confirmed: false, expired: true)
 
         reg_user.reload
@@ -2159,7 +2245,7 @@ RSpec.describe Admin::UsersController do
         expect(reg_user).to be_silenced
       end
 
-      it "will set a length of time if provided" do
+      it "sets the provided duration" do
         future_date = 1.month.from_now.to_date
         put "/admin/users/#{reg_user.id}/silence.json",
             params: {
@@ -2173,7 +2259,7 @@ RSpec.describe Admin::UsersController do
         expect(reg_user.silenced_till).to eq(future_date)
       end
 
-      it "will send a message if provided" do
+      it "sends the provided message" do
         expect do
           put "/admin/users/#{reg_user.id}/silence.json",
               params: {
@@ -2501,7 +2587,7 @@ RSpec.describe Admin::UsersController do
 
   describe "#delete_other_accounts_with_same_ip" do
     shared_examples "deleting other accounts with same ip possible" do
-      it "works" do
+      it "deletes other accounts with the same IP while preserving the target user" do
         target_user = Fabricate(:user, ip_address: "42.42.42.42")
         user_a = Fabricate(:user, ip_address: "42.42.42.42")
         user_b = Fabricate(:user, ip_address: "42.42.42.42")
@@ -2650,7 +2736,17 @@ RSpec.describe Admin::UsersController do
         expect(response.status).to eq(200)
       end
 
-      it "should create new users" do
+      it "handles a payload whose base64 contains a '+'" do
+        encoded = Base64.strict_encode64("external_id=1&email=bob@bob.com&username=bob&name=Bob~~~")
+        expect(encoded).to include("+")
+        sig = OpenSSL::HMAC.hexdigest("sha256", sso_secret, encoded)
+
+        post "/admin/users/sync_sso.json", params: { sso: encoded, sig: sig }
+        expect(response.status).to eq(200)
+        expect(User.find_by(username: "bob").name).to eq("Bob~~~")
+      end
+
+      it "creates new users" do
         sso.name = "Dr. Claw"
         sso.username = "dr_claw"
         sso.email = "dr@claw.com"
@@ -2682,7 +2778,7 @@ RSpec.describe Admin::UsersController do
         expect(events).to include(event_name: :sync_sso, params: [user])
       end
 
-      it "should return the right message if the record is invalid" do
+      it "returns an error for an invalid record" do
         sso.email = ""
         sso.name = ""
         sso.external_id = "1"
@@ -2692,7 +2788,7 @@ RSpec.describe Admin::UsersController do
         expect(response.parsed_body["message"]).to include("Primary email can't be blank")
       end
 
-      it "should return the right message if the signature is invalid" do
+      it "returns an error for an invalid signature" do
         sso.name = "Dr. Claw"
         sso.username = "dr_claw"
         sso.email = "dr@claw.com"
@@ -2715,6 +2811,18 @@ RSpec.describe Admin::UsersController do
         expect(response.status).to eq(422)
         expect(response.parsed_body["message"]).to include(
           I18n.t("discourse_connect.blank_id_error"),
+        )
+      end
+
+      it "returns the right message if the external id is banned" do
+        sso.name = "Dr. Claw"
+        sso.username = "dr_claw"
+        sso.email = "dr@claw.com"
+        sso.external_id = "none"
+        post "/admin/users/sync_sso.json", params: Rack::Utils.parse_query(sso.payload)
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["message"]).to include(
+          I18n.t("discourse_connect.banned_id_error"),
         )
       end
     end
@@ -2774,7 +2882,7 @@ RSpec.describe Admin::UsersController do
         expect(user.reload.user_second_factors.totps.first).to eq(second_factor)
       end
 
-      it "should able to disable the second factor for another user" do
+      it "disables second factor for another user" do
         expect do put "/admin/users/#{user.id}/disable_second_factor.json" end.to change {
           Jobs::CriticalUserEmail.jobs.length
         }.by(1)
@@ -2789,21 +2897,22 @@ RSpec.describe Admin::UsersController do
         expect(job_args["type"]).to eq("account_second_factor_disabled")
       end
 
-      it "should not be able to disable the second factor for the current user" do
+      it "rejects disabling second factor for the current user" do
         put "/admin/users/#{admin.id}/disable_second_factor.json"
 
         expect(response.status).to eq(403)
       end
 
       describe "when user has only one second factor type enabled" do
-        it "should succeed with security keys" do
+        it "disables security key authentication" do
           user.user_second_factors.destroy_all
 
           put "/admin/users/#{user.id}/disable_second_factor.json"
 
           expect(response.status).to eq(200)
         end
-        it "should succeed with totp" do
+
+        it "disables TOTP authentication" do
           user.security_keys.destroy_all
 
           put "/admin/users/#{user.id}/disable_second_factor.json"
@@ -2813,7 +2922,7 @@ RSpec.describe Admin::UsersController do
       end
 
       describe "when user does not have second factor enabled" do
-        it "should raise the right error" do
+        it "returns 400 when second factor is not enabled" do
           user.user_second_factors.destroy_all
           user.security_keys.destroy_all
 
@@ -2913,7 +3022,7 @@ RSpec.describe Admin::UsersController do
   describe "#delete_posts_batch" do
     shared_examples "post batch deletion possible" do
       context "when user is is invalid" do
-        it "should return the right response" do
+        it "returns 404 for an invalid user" do
           put "/admin/users/nothing/delete_posts_batch.json"
 
           expect(response.status).to eq(404)
@@ -2980,6 +3089,7 @@ RSpec.describe Admin::UsersController do
   describe "#delete_posts_decider" do
     shared_examples "delete_posts_decider accessible" do |acting_user_role|
       let(:acting_user) { send(acting_user_role) }
+
       context "when user exists" do
         fab!(:target_user, :user)
 
@@ -3039,11 +3149,13 @@ RSpec.describe Admin::UsersController do
 
     context "when logged in as an admin" do
       before { sign_in(admin) }
+
       include_examples "delete_posts_decider accessible", :admin
     end
 
     context "when logged in as a moderator" do
       before { sign_in(moderator) }
+
       include_examples "delete_posts_decider accessible", :moderator
 
       context "when target user is another moderator" do
@@ -3092,7 +3204,7 @@ RSpec.describe Admin::UsersController do
     context "when logged in as an admin" do
       before { sign_in(admin) }
 
-      it "should merge source user to target user" do
+      it "merges the source user into the target user" do
         Jobs.run_immediately!
         post "/admin/users/#{user.id}/merge.json", params: { target_username: target_user.username }
 
@@ -3242,7 +3354,7 @@ RSpec.describe Admin::UsersController do
 
   describe "#anonymize" do
     shared_examples "user anonymization possible" do
-      it "will make the user anonymous" do
+      it "anonymizes the user" do
         put "/admin/users/#{user.id}/anonymize.json"
         expect(response.status).to eq(200)
         expect(response.parsed_body["username"]).to be_present
@@ -3289,7 +3401,7 @@ RSpec.describe Admin::UsersController do
     context "when logged in as a moderator" do
       before { sign_in(moderator) }
 
-      it "will reset the bounce score" do
+      it "resets the bounce score" do
         post "/admin/users/#{user.id}/reset-bounce-score.json"
 
         expect(response.status).to eq(200)

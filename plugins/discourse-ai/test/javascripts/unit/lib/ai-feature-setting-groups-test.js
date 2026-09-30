@@ -71,13 +71,40 @@ module("Unit | Lib | ai-feature-setting-groups", function () {
   test("returns correct groups for search", function (assert) {
     const groups = getSettingGroupsForFeature("search");
 
-    assert.strictEqual(groups.length, 1, "search should have 1 group");
+    assert.deepEqual(
+      groups.map((group) => group.key),
+      ["settings", "agents", "access_control", "ask_ai_reports"]
+    );
+    assert.deepEqual(groups[0].settings, [
+      "ai_discover_enabled",
+      "ai_ask_ai_enabled",
+      "ai_ask_ai_summary_detail",
+      "ai_ask_ai_related_count",
+    ]);
+    assert.deepEqual(groups[1].settings, [
+      "ai_discover_agent",
+      "ai_ask_ai_agent",
+      "ai_ask_ai_query_rewriter_agent",
+      "ai_ask_ai_report_agent",
+      "ai_ask_ai_follow_up_agent",
+    ]);
+    assert.deepEqual(groups[2].settings, ["ai_ask_ai_allowed_groups"]);
+    assert.deepEqual(groups[3].settings, [
+      "ai_ask_ai_report_weekly_enabled",
+      "ai_ask_ai_report_exclude_groups",
+      "ai_ask_ai_report_max_asks",
+      "ai_ask_ai_report_recipient_groups",
+    ]);
   });
 
   test("returns correct groups for translation", function (assert) {
     const groups = getSettingGroupsForFeature("translation");
 
     assert.strictEqual(groups.length, 3, "translation should have 3 groups");
+    assert.true(
+      groups[2].settings.includes("ai_translation_backfill_start_date"),
+      "backfill should include the fixed start date"
+    );
   });
 
   test("returns correct groups for discord", function (assert) {

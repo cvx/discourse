@@ -130,11 +130,14 @@ class Demon::Sidekiq < ::Demon::Base
 
     # Sidekiq not as high priority as web, in this environment it is forked so a web is very
     # likely running
-    Discourse::Utils.execute_command("renice", "-n", "5", "-p", Process.pid.to_s)
+    Process.setpriority(Process::PRIO_PROCESS, Process.pid, 5)
 
     cli.parse(options)
     load Rails.root + "config/initializers/100-sidekiq.rb"
-    cli.run
+
+    # This process inherits the heap warmed by the mold.
+    # Warming it again compacts it, copying every page shared with the parent.
+    cli.run(warmup: false)
   rescue => error
     log(
       "Error encountered while starting Sidekiq: [#{error.class}] #{error.message}\n#{error.backtrace.join("\n")}",

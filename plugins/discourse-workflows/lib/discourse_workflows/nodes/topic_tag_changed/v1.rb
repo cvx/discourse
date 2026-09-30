@@ -24,16 +24,10 @@ module DiscourseWorkflows
             color: "deep-orange",
           },
           group: "discourse_triggers",
-          events: [:topic_tags_changed],
+          event: :topic_tags_changed,
           output_contracts: [{ schema: OUTPUT_SCHEMA }],
           properties: {
-            category_id: {
-              type: :integer,
-              required: false,
-              ui: {
-                control: :category,
-              },
-            },
+            **CATEGORY_FILTER_PROPERTIES,
           },
         )
 
@@ -60,7 +54,11 @@ module DiscourseWorkflows
         end
 
         def matches?(trigger_ctx)
-          matches_category?(trigger_ctx.get_node_parameter("category_id"))
+          matches_category_ids?(
+            @topic.category_id,
+            category_ids_parameter(trigger_ctx),
+            include_subcategories: trigger_ctx.get_node_parameter("include_subcategories", true),
+          )
         end
 
         private
@@ -71,14 +69,6 @@ module DiscourseWorkflows
 
         def removed_tags
           @old_tag_names - @new_tag_names
-        end
-
-        def topic_data(topic)
-          serialize_record(topic, TopicListItemSerializer)
-        end
-
-        def matches_category?(category_id)
-          category_id.blank? || @topic.category_id == category_id.to_i
         end
       end
     end

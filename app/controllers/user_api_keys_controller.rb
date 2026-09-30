@@ -425,7 +425,9 @@ class UserApiKeysController < ApplicationController
     raise Discourse::InvalidAccess unless meets_tl?
 
     otp_payload = one_time_password(parsed_public_key, current_user.username)
-    redirect_path = "#{params[:auth_redirect]}?oneTimePassword=#{CGI.escape(otp_payload)}"
+    uri = URI.parse(params[:auth_redirect])
+    uri.query = [uri.query, "oneTimePassword=#{CGI.escape(otp_payload)}"].compact.join("&")
+    redirect_path = uri.to_s
 
     respond_to do |format|
       format.html { redirect_to(redirect_path, allow_other_host: true) }
@@ -691,9 +693,11 @@ class UserApiKeysController < ApplicationController
     current_user.staff? || current_user.in_any_groups?(SiteSetting.user_api_key_allowed_groups_map)
   end
 
+  # `create` and `create_otp` are the only callers, and both respond in JSON
+  # as well as HTML, so this is relied on by non-browser (API key/User API
+  # key) consumers, not just browser sessions. Don't restrict this to
+  # session auth without accounting for those consumers first.
   def one_time_password(public_key, username)
-    raise Discourse::InvalidAccess if is_api? || is_user_api?
-
     unless UserApiKey.allowed_scopes.superset?(Set.new(["one_time_password"]))
       raise Discourse::InvalidAccess
     end

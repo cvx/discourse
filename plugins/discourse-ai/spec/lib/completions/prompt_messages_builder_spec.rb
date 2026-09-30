@@ -7,6 +7,36 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
   fab!(:bot_user, :user)
   fab!(:other_user, :user)
 
+  describe ".filtered_upload_ids_for_prompt" do
+    def filter(upload_ids, guardian)
+      described_class.filtered_upload_ids_for_prompt(
+        upload_ids,
+        include_image_uploads: true,
+        include_document_uploads: false,
+        guardian: guardian,
+      )
+    end
+
+    it "does not load an access control post per secure upload" do
+      post = Fabricate(:post)
+      uploads =
+        3.times.map { Fabricate(:image_upload, secure: true, access_control_post_id: post.id) }
+
+      queries = track_sql_queries { filter(uploads.map(&:id), Guardian.new(Discourse.system_user)) }
+
+      expect(queries.count { |sql| sql.include?(%{FROM "posts"}) }).to eq(1)
+    end
+
+    it "still hides an upload whose access control post was deleted" do
+      post = Fabricate(:private_message_post)
+      upload = Fabricate(:image_upload)
+      upload.update!(access_control_post_id: post.id, secure: true)
+      post.trash!
+
+      expect(filter([upload.id], Fabricate(:user).guardian)).to be_nil
+    end
+  end
+
   fab!(:image_upload1) do
     Fabricate(:upload, user: user, original_filename: "image.png", extension: "png")
   end
@@ -41,14 +71,14 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
     expect(content[3]).to eq({ upload_id: 2 })
   end
 
-  it "should allow merging user messages" do
+  it "merges user messages" do
     builder.push(type: :user, content: "Hello", id: "Alice")
     builder.push(type: :user, content: "World", id: "Bob")
 
     expect(builder.to_a).to eq([{ type: :user, content: "Alice: Hello\nBob: World" }])
   end
 
-  it "should allow adding uploads" do
+  it "adds uploads" do
     builder.push(type: :user, content: "Hello", name: "Alice", upload_ids: [1, 2])
 
     expect(builder.to_a).to eq(
@@ -56,7 +86,7 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
     )
   end
 
-  it "should support function calls" do
+  it "supports function calls" do
     builder.push(type: :user, content: "Echo 123 please", name: "Alice")
     builder.push(type: :tool_call, content: "echo(123)", name: "echo", id: 1)
     builder.push(type: :tool, content: "123", name: "echo", id: 1)
@@ -70,7 +100,7 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
     expect(builder.to_a).to eq(expected)
   end
 
-  it "should drop a tool call if it is not followed by tool" do
+  it "drops a tool call that is not followed by a tool result" do
     builder.push(type: :user, content: "Echo 123 please", id: "Alice")
     builder.push(type: :tool_call, content: "echo(123)", name: "echo", id: 1)
     builder.push(type: :user, content: "OK", id: "James")
@@ -79,7 +109,7 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
     expect(builder.to_a).to eq(expected)
   end
 
-  it "should format messages for topic style" do
+  it "formats messages for topic style" do
     # Create a topic with tags
     topic = Fabricate(:topic, title: "This is an Example Topic")
 
@@ -628,6 +658,48 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
       # will be brittle, but open to changing this
     end
 
+    it "excludes hidden posts the triggering user cannot see from topic context" do
+      topic = Fabricate(:topic, title: "Public topic with hidden reply")
+      visible_post =
+        Fabricate(
+          :post,
+          topic: topic,
+          user: other_user,
+          post_number: 1,
+          raw: "Visible context for the prompt",
+        )
+      hidden_post =
+        Fabricate(
+          :post,
+          topic: topic,
+          user: other_user,
+          post_number: 2,
+          raw: "Hidden context that must not reach the prompt",
+          hidden: true,
+        )
+      trigger_post =
+        Fabricate(
+          :post,
+          topic: topic,
+          user: user,
+          post_number: 3,
+          raw: "Please answer using the visible context",
+        )
+      expect(Guardian.new(user).can_see?(hidden_post)).to eq(false)
+
+      context =
+        described_class.messages_from_post(
+          trigger_post,
+          max_posts: 10,
+          bot_usernames: [bot_user.username],
+          include_uploads: false,
+        )
+
+      content = context.flat_map { |message| Array(message[:content]) }.join
+      expect(content).to include(visible_post.raw, trigger_post.raw)
+      expect(content).not_to include(hidden_post.raw)
+    end
+
     it "includes document post uploads independently from image uploads" do
       UploadReference.create!(target: third_post, upload: image_upload1)
       UploadReference.create!(target: third_post, upload: document_upload)
@@ -698,7 +770,31 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
       }.not_to raise_error
     end
 
-    it "handles uploads correctly in topic style messages (and times)" do
+    it "attaches referenced bot post uploads to custom prompt model messages" do
+      second_post.update_columns(raw: "Here is the result ![image](#{image_upload1.short_url})")
+      UploadReference.create!(target: second_post, upload: image_upload1)
+      PostCustomPrompt.create!(
+        post_id: second_post.id,
+        custom_prompt: [
+          [second_post.raw, bot_user.username, nil, nil, { message: "Generated an image" }],
+        ],
+      )
+
+      context =
+        described_class.messages_from_post(
+          third_post,
+          max_posts: 10,
+          bot_usernames: [bot_user.username],
+          include_image_uploads: true,
+          include_document_uploads: false,
+        )
+
+      expect(context.find { |message| message[:type] == :model }).to include(
+        content: [second_post.raw, { upload_id: image_upload1.id }],
+      )
+    end
+
+    it "combines uploads and timestamps in topic-style messages" do
       freeze_time 32.days.ago
 
       # Use Discourse's upload format in the post raw content
@@ -771,6 +867,7 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
           *[{ type: :user, id: user.username, content: third_post.raw }],
         )
       end
+
       it "starts from the last compressed checkpoint" do
         builder.push(type: :user, content: "Old request")
         builder.push(type: :model, content: "Old response")
@@ -907,7 +1004,7 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
       )
     end
 
-    it "handles uploads correctly in topic style messages (and times)" do
+    it "retains upload Markdown while attaching uploads to topic-style messages" do
       freeze_time 32.days.ago
 
       # Use Discourse's upload format in the post raw content
@@ -1055,6 +1152,7 @@ describe DiscourseAi::Completions::PromptMessagesBuilder do
           ],
         )
       end
+
       it "normalizes saved thinking provider info" do
         custom_prompt = [
           [

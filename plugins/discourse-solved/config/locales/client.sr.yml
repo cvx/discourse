@@ -10,8 +10,6 @@ sr:
       dashboard:
         sections:
           support:
-            filter:
-              all_categories: "Sve kategorije"
             answerers:
               staff: "Osoblje"
               member: "Članovi"
@@ -20,6 +18,9 @@ sr:
               buckets:
                 gt_24h: "> 24 sata"
   js:
+    discourse_workflows:
+      solution_changed:
+        tag_names: "Tagovi"
     notifications:
       alt:
         solved:
@@ -30,6 +31,12 @@ sr:
         all: "sve"
       move_post_cancel: "Odustani"
       confirm_solved_removal_cancel: "Odustani"
+    admin:
+      reports:
+        related_items:
+          labels:
+            topic: "Tema"
+            category: "Kategorija"
     discourse_automation:
       triggerables:
         first_accepted_solution:

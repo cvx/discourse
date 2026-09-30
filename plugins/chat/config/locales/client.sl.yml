@@ -41,6 +41,8 @@ sl:
         yesterday: "Včeraj"
       create: "Ustvari"
       cancel: "Prekliči"
+      pinned_bar:
+        title: "Pripeto"
       pinned: "Pripeto"
       channel_settings:
         edit: "Uredi"
@@ -177,7 +179,12 @@ sl:
           relevance: "Pomembnosti"
           latest: "Najnovejše"
       direct_messages:
-        close: "Zapri ta osebni klepet"
+        new_group: "Nov skupinski klepet"
+      channel_list:
+        options:
+          filter: "Filter"
+        filter:
+          mentions: "Omembe"
       incoming_webhooks:
         back: "Nazaj"
         description: "Opis"
@@ -261,3 +268,8 @@ sl:
         message: "Opozorilo"
       chat_approval:
         message: "Opozorilo"
+        value: "Stanje"
+        style_default: "Privzeto"
+        style_primary: "Primarna"
+        style_success: "Uspeh"
+        icon: "Ikona"

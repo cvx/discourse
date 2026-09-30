@@ -17,6 +17,7 @@ class Stylesheet::Manager
   private_constant :CACHE_PATH
 
   MANIFEST_DIR = "#{Rails.root.join("tmp/cache/assets/#{Rails.env}")}"
+  VARIABLE_RENAMES_PATH = Rails.root.join("app/assets/stylesheets/variable-renames.json")
   THEME_REGEX = /_theme(_rtl)?\z/
   COLOR_SCHEME_STYLESHEET = "color_definitions"
 
@@ -49,7 +50,7 @@ class Stylesheet::Manager
   end
 
   def self.precompile_css
-    targets = %i[common desktop mobile admin wizard]
+    targets = %i[common admin wizard]
     targets += targets.map { |t| :"#{t}_rtl" }
 
     targets +=
@@ -189,6 +190,7 @@ class Stylesheet::Manager
       "#{Rails.root.join("app/assets/stylesheets/**/*.*css")}",
       "#{Rails.root.join("app/assets/images/**/*.*")}",
       "#{Rails.root.join("lib/stylesheet/*.rb")}",
+      VARIABLE_RENAMES_PATH.to_s,
     ]
 
     Discourse.plugins.each do |plugin|
@@ -267,11 +269,11 @@ class Stylesheet::Manager
     themes
   end
 
-  def stylesheet_data(target = :desktop)
+  def stylesheet_data(target)
     stylesheet_details(target, "all")
   end
 
-  def stylesheet_preload_tag(target = :desktop, media = "all")
+  def stylesheet_preload_tag(target, media = "all")
     stylesheets = stylesheet_details(target, media)
     stylesheets
       .map do |stylesheet|
@@ -282,7 +284,7 @@ class Stylesheet::Manager
       .html_safe
   end
 
-  def stylesheet_link_tag(target = :desktop, media = "all", preload_callback = nil)
+  def stylesheet_link_tag(target, media = "all", preload_callback = nil)
     stylesheets = stylesheet_details(target, media)
     stylesheets
       .map do |stylesheet|
@@ -298,7 +300,7 @@ class Stylesheet::Manager
       .html_safe
   end
 
-  def stylesheet_details(target = :desktop, media = "all")
+  def stylesheet_details(target, media = "all")
     target = target.to_sym
     current_hostname = Discourse.current_hostname
     relative_url_root = GlobalSetting.relative_url_root

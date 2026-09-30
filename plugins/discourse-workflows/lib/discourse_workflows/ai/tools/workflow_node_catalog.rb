@@ -139,6 +139,22 @@ module DiscourseWorkflows
                 author_username: "system",
               },
             },
+            {
+              name: "Delete the trigger post",
+              parameters: {
+                operation: "delete",
+                post_id: "={{ $json.post.id }}",
+                actor_username: "system",
+              },
+            },
+            {
+              name: "Restore a deleted post",
+              parameters: {
+                operation: "recover",
+                post_id: "={{ $json.post.id }}",
+                actor_username: "system",
+              },
+            },
           ],
           "action:send_personal_message" => [
             {
@@ -148,6 +164,16 @@ module DiscourseWorkflows
                 title: "=New post from @{{ $json.post.username }}",
                 raw: "=A group member posted: {{ $json.post.post_url }}",
                 sender_username: "system",
+              },
+            },
+          ],
+          "action:send_chat_integration_message" => [
+            {
+              name: "Send a message to an external chat integration channel",
+              parameters: {
+                channel_id: 123,
+                channel_name: "Slack: #general",
+                message: "={{ $json.post.excerpt }}",
               },
             },
           ],
@@ -174,6 +200,47 @@ module DiscourseWorkflows
               },
             },
           ],
+          "action:tag_group" => [
+            {
+              name: "Add tags to a tag group",
+              parameters: {
+                operation: "add",
+                tag_group_id: 123,
+                tag_names: "needs-review, escalated",
+                actor_username: "system",
+              },
+            },
+          ],
+          "action:site_setting" => [
+            {
+              name: "Set a site setting to a templated value",
+              parameters: {
+                name: "site_description",
+                value: "=The friendliest community of {{ $json.year }}",
+                actor_username: "system",
+              },
+            },
+          ],
+          "action:topic_category" => [
+            {
+              name: "Move the trigger topic to another category",
+              parameters: {
+                topic_id: "={{ $json.topic.id }}",
+                category_id: 123,
+                actor_username: "system",
+              },
+            },
+          ],
+          "action:topic_moderation" => [
+            {
+              name: "Unlist the trigger topic",
+              parameters: {
+                operation: "unlist_topic",
+                topic_id: "={{ $json.topic.id }}",
+                actor_username: "system",
+              },
+            },
+          ],
         }.freeze
 
         QUERY_STOP_WORDS = %w[
@@ -190,16 +257,33 @@ module DiscourseWorkflows
 
         SEARCH_ALIASES = {
           "action:send_personal_message" => "dm direct message pm personal private message",
+          "action:send_chat_integration_message" =>
+            "external chat integration notification slack discord telegram mattermost matrix zulip rocket chat gitter groupme teams power automate webex google chat guilded",
           "action:ai_agent" =>
             "ai agent bot llm classify summarize generate sentiment triage runner run as permissions uploads attachments",
           "action:group" => "group membership member belongs friend friends",
+          "action:tag_group" => "tag group tags taxonomy add remove organize",
+          "action:site_setting" =>
+            "site setting settings configuration config admin toggle enable disable change update value",
+          "action:flag_user" =>
+            "flag user report spammer spam suspect review queue moderation approve reject account signup",
           "trigger:user_added_to_group" => "joined added to group membership member",
           "trigger:user_removed_from_group" => "left removed from group membership member",
+          "trigger:user_created" => "signup sign up register registration new account joined site",
+          "trigger:user_updated" => "profile edited changed avatar name username email account",
+          "trigger:reviewable_created" =>
+            "review queue flag flagged spam moderation pending needs approval queued post akismet",
           "trigger:badge_granted" => "badge award achievement medal granted earned",
+          "trigger:tag_created" => "taxonomy label keyword created new",
+          "trigger:post_destroyed" => "post deleted removed destroyed trashed",
+          "trigger:post_recovered" => "post recovered restored undeleted untrashed",
           "action:user" =>
             "user profile bio title trust level lock groups fields lookup edit update",
           "action:flag_post" =>
             "flag spam moderation review queue reviewable hide delete silence triage report",
+          "action:topic_category" => "category recategorize move topic uncategorized",
+          "action:topic_moderation" =>
+            "moderate moderation unlist unlisted topic visibility invisible",
         }.freeze
 
         def self.signature
@@ -237,6 +321,8 @@ module DiscourseWorkflows
 
           nodes =
             DiscourseWorkflows::Registry.nodes.filter_map do |node_class|
+              next if !node_class.palette_visible?
+
               serialize_node(node_class, query_terms, include_examples)
             end
 

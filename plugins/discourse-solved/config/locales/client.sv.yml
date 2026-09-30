@@ -15,8 +15,6 @@ sv:
         sections:
           support:
             title: "Stöd"
-            filter:
-              all_categories: "Alla kategorier"
             answerers:
               staff: "Personal"
               member: "Medlemmar"
@@ -26,6 +24,10 @@ sv:
                 lt_1h: "< 1 timme"
                 gt_24h: "> 24 timmar"
   js:
+    discourse_workflows:
+      solution_changed:
+        changes_removed: "Borttagen"
+        tag_names: "Taggar"
     notifications:
       alt:
         solved:
@@ -74,6 +76,11 @@ sv:
           solved: "är lösta"
           unsolved: "är olösta"
     admin:
+      reports:
+        related_items:
+          labels:
+            topic: "Ämne"
+            category: "Kategori"
       web_hooks:
         solved_event:
           group_name: "Löst händelse"

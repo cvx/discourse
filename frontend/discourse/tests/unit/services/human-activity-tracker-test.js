@@ -1,6 +1,6 @@
 import { triggerEvent } from "@ember/test-helpers";
 import { setupTest } from "ember-qunit";
-import { module, skip, test } from "qunit";
+import { module, test } from "qunit";
 import sinon from "sinon";
 import { processBrowserAttentionChange } from "discourse/lib/user-presence";
 
@@ -47,6 +47,7 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
 
     this.tracker = this.owner.lookup("service:human-activity-tracker");
     this.tracker.now = () => this.clock.ms;
+    this.tracker.trustedEvent = () => true;
     this.tracker.transport = (body) => this.sent.push(body);
     this.tracker.scheduleFlush = (callback) => {
       this.flushTick = callback;
@@ -67,11 +68,69 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
     assert.strictEqual(this.sent.length, 0);
   });
 
-  // TODO: Flaky, skipped while investigating a global getBoundingClientRect error.
-  skip("counts interaction events and reports them on flush", async function (assert) {
+  test("waits for a scheduled flush after two interaction categories are recorded", function (assert) {
+    this.clock.ms = 6000;
+    window.dispatchEvent(new Event("keydown"));
+
+    assert.strictEqual(this.sent.length, 0);
+
+    window.dispatchEvent(new Event("mousedown"));
+
+    assert.strictEqual(this.sent.length, 0);
+
+    this.clock.ms = 600_000;
+    this.flushTick();
+
+    assert.strictEqual(this.sent.length, 1);
+  });
+
+  test("sends one update after engagement reaches ten seconds", async function (assert) {
     await triggerEvent(document.body, "keydown");
     await triggerEvent(document.body, "mousedown");
-    await triggerEvent(document.body, "scroll");
+
+    this.clock.ms = 5000;
+    blur(this);
+
+    this.clock.ms = 6000;
+    focus(this);
+
+    this.clock.ms = 11_000;
+    blur(this);
+
+    assert.strictEqual(this.sent.length, 2);
+    assert.strictEqual(this.sent.at(-1).engaged_seconds, 10);
+
+    this.clock.ms = 12_000;
+    focus(this);
+
+    this.clock.ms = 17_000;
+    blur(this);
+
+    assert.strictEqual(this.sent.length, 2);
+  });
+
+  test("ignores untrusted synthetic events", async function (assert) {
+    this.tracker.trustedEvent = (event) => event.isTrusted;
+
+    await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
+    await triggerEvent(document.body, "mousemove", {
+      clientX: 10,
+      clientY: 10,
+    });
+    await triggerEvent(document.body, "mousemove", {
+      clientX: 20,
+      clientY: 20,
+    });
+    pagehide();
+
+    assert.strictEqual(this.sent.length, 0);
+  });
+
+  test("counts interaction events and reports them on flush", function (assert) {
+    window.dispatchEvent(new Event("keydown"));
+    window.dispatchEvent(new Event("mousedown"));
+    window.dispatchEvent(new Event("scroll"));
     pagehide();
 
     const payload = this.sent.at(-1);
@@ -96,6 +155,7 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
       clientX: 900,
       clientY: 900,
     });
+    await triggerEvent(document.body, "keydown");
     pagehide();
 
     assert.strictEqual(this.sent.at(-1).mouse_move_events, 1);
@@ -104,6 +164,7 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
   test("reports the time to the first interaction", async function (assert) {
     this.clock.ms = 2500;
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
     this.clock.ms = 9000;
     pagehide();
@@ -113,6 +174,7 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
 
   test("accumulates only visible-and-focused time as engaged duration", async function (assert) {
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
     this.clock.ms = 4000;
     blur(this);
@@ -128,6 +190,7 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
 
   test("flushes the latest snapshot when the tab is hidden", async function (assert) {
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
     this.clock.ms = 5000;
     hide(this);
@@ -139,6 +202,7 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
   test("caps engaged seconds at the configured maximum", async function (assert) {
     this.tracker.siteSettings.browser_pageview_max_engaged_seconds = 5;
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
     this.clock.ms = 9000;
     pagehide();
@@ -148,47 +212,66 @@ module("Unit | Service | human-activity-tracker", function (hooks) {
 
   test("throttles sends to at most one every three seconds", async function (assert) {
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
     this.clock.ms = 1000;
-    blur(this);
+    this.flushTick();
 
     this.clock.ms = 2000;
-    focus(this);
-    this.clock.ms = 3000;
-    blur(this);
+    await triggerEvent(document.body, "scroll");
+    this.flushTick();
 
     assert.strictEqual(this.sent.length, 1);
 
     this.clock.ms = 6000;
-    focus(this);
-    this.clock.ms = 7000;
-    blur(this);
+    await triggerEvent(document.body, "touchstart");
+    this.flushTick();
 
     assert.strictEqual(this.sent.length, 2);
   });
 
   test("always flushes on pagehide, bypassing the throttle", async function (assert) {
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
     this.clock.ms = 1000;
-    blur(this);
+    this.flushTick();
 
     this.clock.ms = 2000;
-    focus(this);
-    this.clock.ms = 3000;
+    await triggerEvent(document.body, "scroll");
+    this.clock.ms = 2500;
     pagehide();
 
     assert.strictEqual(this.sent.length, 2);
   });
 
-  test("keeps sending periodic snapshots on each flush cadence", async function (assert) {
+  test("sends periodic snapshots only after a new event category is recorded", async function (assert) {
     await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
 
-    this.clock.ms = 180_000;
+    this.clock.ms = 600_000;
     this.flushTick();
 
-    this.clock.ms = 360_000;
+    this.clock.ms = 1_200_000;
     this.flushTick();
+
+    await triggerEvent(document.body, "scroll");
+
+    this.clock.ms = 1_800_000;
+    this.flushTick();
+
+    assert.strictEqual(this.sent.length, 2);
+  });
+
+  test("sends a final snapshot on pagehide even without a new event category", async function (assert) {
+    await triggerEvent(document.body, "keydown");
+    await triggerEvent(document.body, "mousedown");
+
+    this.clock.ms = 600_000;
+    this.flushTick();
+
+    this.clock.ms = 1_200_000;
+    pagehide();
 
     assert.strictEqual(this.sent.length, 2);
   });

@@ -1,11 +1,12 @@
 import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
 import { array, fn, hash } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { LinkTo } from "@ember/routing";
 import { service } from "@ember/service";
 import { trustHTML } from "@ember/template";
+import AdvancedModeToggle from "discourse/components/advanced-mode-toggle";
+import DSegmentedControl from "discourse/components/d-segmented-control";
 import Form from "discourse/components/form";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import lazyHash from "discourse/helpers/lazy-hash";
@@ -28,7 +29,7 @@ import DButton from "discourse/ui-kit/d-button";
 import DCopyButton from "discourse/ui-kit/d-copy-button";
 import DFutureDateInput from "discourse/ui-kit/d-future-date-input";
 import DModal from "discourse/ui-kit/d-modal";
-import dIcon from "discourse/ui-kit/helpers/d-icon";
+import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import { i18n } from "discourse-i18n";
 
 const FORM = "form";
@@ -46,10 +47,11 @@ export default class CreateInviteWithRoles extends Component {
   @tracked screen = FORM;
   @tracked role;
   @tracked staffRole = "admin";
-  @tracked delivery;
+  @tracked delivery = "link";
   @tracked submitForcedDisabled = false;
   @tracked flashText;
   @tracked flashClass = "info";
+  @tracked linkAutoCopied = false;
 
   @tracked topics = this.invite.topics ?? this.model.topics ?? [];
   model = this.args.model;
@@ -57,6 +59,7 @@ export default class CreateInviteWithRoles extends Component {
 
   allGroups = this.site.groups.filter((g) => !g.automatic);
   cameFromSummary = false;
+  initialStaffRole;
   formApi;
 
   constructor() {
@@ -74,10 +77,20 @@ export default class CreateInviteWithRoles extends Component {
           : "member";
       this.delivery = "link";
     }
+
+    this.initialStaffRole = this.staffRole;
+  }
+
+  get allowEmailInvites() {
+    return this.siteSettings.allow_email_invites;
   }
 
   get canInviteAdmins() {
     return !!this.currentUser?.can_create_admin_invite;
+  }
+
+  get canChooseRole() {
+    return this.canInviteAdmins && !this.inviteCreated;
   }
 
   get roleItems() {
@@ -86,13 +99,11 @@ export default class CreateInviteWithRoles extends Component {
         value: "member",
         label: i18n("user.invited.invite_roles.member_tab"),
         icon: "user",
-        disabled: this.inviteCreated && this.isAdminInvite,
       },
       {
         value: "admin",
         label: i18n("user.invited.invite_roles.admin_tab"),
         icon: "shield-halved",
-        disabled: this.inviteCreated && !this.isAdminInvite,
       },
     ];
   }
@@ -102,7 +113,7 @@ export default class CreateInviteWithRoles extends Component {
   }
 
   get isEmailDelivery() {
-    return this.isAdminInvite || this.delivery === "email";
+    return this.delivery === "email";
   }
 
   get inviteCreated() {
@@ -133,6 +144,10 @@ export default class CreateInviteWithRoles extends Component {
     return this.isAdminInvite && this.staffRole === "moderator";
   }
 
+  get staffRoleLabel() {
+    return i18n("user.invited.invite_roles.staff_role_label");
+  }
+
   get staffRoleItems() {
     return [
       {
@@ -146,11 +161,7 @@ export default class CreateInviteWithRoles extends Component {
     ];
   }
 
-  get roleDescription() {
-    if (!this.isAdminInvite) {
-      return i18n("user.invited.invite_roles.member_description");
-    }
-
+  get staffRoleDescription() {
     return this.isModeratorInvite
       ? i18n("user.invited.invite_roles.moderator_description")
       : i18n("user.invited.invite_roles.admin_description");
@@ -177,7 +188,7 @@ export default class CreateInviteWithRoles extends Component {
   get canInviteToGroup() {
     return (
       this.currentUser.staff ||
-      this.currentUser.groups.some((g) => g.group_user?.owner)
+      this.currentUser.visibleGroups.some((g) => g.group_user?.owner)
     );
   }
 
@@ -213,8 +224,12 @@ export default class CreateInviteWithRoles extends Component {
   get adminFormData() {
     const data = {
       email: this.invite.email ?? "",
+      domain: this.invite.domain ?? "",
       description: this.invite.description ?? "",
       customMessage: this.invite.custom_message ?? "",
+      // seeded from the untracked copy: reading the tracked property here would
+      // give `<Form>` a new @data identity on every change, tearing the form down
+      staffRole: this.initialStaffRole,
     };
 
     if (this.inviteCreated) {
@@ -312,6 +327,20 @@ export default class CreateInviteWithRoles extends Component {
     return rows;
   }
 
+  get submitDisabled() {
+    return this.saving || this.submitForcedDisabled;
+  }
+
+  get isLinkCreation() {
+    return !this.inviteCreated && !this.isEmailDelivery;
+  }
+
+  get emailFieldLabel() {
+    return this.isAdminInvite
+      ? i18n("user.invited.invite_roles.admin_email_label")
+      : i18n("user.invited.invite_roles.member_email_label");
+  }
+
   expiresAtFrom(data) {
     if (data.expiresAt) {
       return data.expiresAt;
@@ -345,14 +374,6 @@ export default class CreateInviteWithRoles extends Component {
     }
   }
 
-  get submitDisabled() {
-    return this.saving || this.submitForcedDisabled;
-  }
-
-  get isLinkCreation() {
-    return !this.inviteCreated && !this.isEmailDelivery;
-  }
-
   @action
   onRoleChange(value) {
     if (this.inviteCreated) {
@@ -365,22 +386,14 @@ export default class CreateInviteWithRoles extends Component {
   }
 
   @action
-  onStaffRoleChange(value) {
-    if (this.inviteCreated) {
-      return;
-    }
+  onStaffRoleChange(value, { set }) {
+    set("staffRole", value);
     this.staffRole = value;
   }
 
   @action
   setDelivery(value) {
     this.delivery = value;
-  }
-
-  get emailFieldLabel() {
-    return this.isAdminInvite
-      ? i18n("user.invited.invite_roles.admin_email_label")
-      : i18n("user.invited.invite_roles.member_email_label");
   }
 
   @action
@@ -407,7 +420,6 @@ export default class CreateInviteWithRoles extends Component {
   async onAdminFormSubmit(data) {
     const wasCreated = this.inviteCreated;
     const submitData = {
-      email: data.email?.trim(),
       description: data.description,
       custom_message: data.customMessage,
       expires_at: this.expiresAtFrom(data),
@@ -419,6 +431,16 @@ export default class CreateInviteWithRoles extends Component {
       } else {
         submitData.is_admin = true;
       }
+    }
+
+    if (this.delivery === "email") {
+      submitData.email = data.email?.trim();
+    } else {
+      // a cleared field arrives as null, and an undefined value would be
+      // dropped from the request, leaving the existing domain in place
+      submitData.domain = data.domain?.trim() ?? "";
+      submitData.max_redemptions_allowed = data.maxRedemptions;
+      submitData.skip_email = true;
     }
 
     await this.save(submitData, SUMMARY);
@@ -441,7 +463,9 @@ export default class CreateInviteWithRoles extends Component {
         nextScreen = EMAIL_SENT;
       }
     } else {
-      submitData.domain = data.domain?.trim();
+      // a cleared field arrives as null, and an undefined value would be
+      // dropped from the request, leaving the existing domain in place
+      submitData.domain = data.domain?.trim() ?? "";
       submitData.max_redemptions_allowed = data.maxRedemptions;
       submitData.skip_email = true;
     }
@@ -451,6 +475,8 @@ export default class CreateInviteWithRoles extends Component {
 
   @action
   async submitForm() {
+    this.linkAutoCopied = false;
+
     if (this.isLinkCreation) {
       // save and copy in one user gesture so the browser allows the
       // clipboard write after the network round-trip
@@ -462,6 +488,8 @@ export default class CreateInviteWithRoles extends Component {
           }
           return new Blob([this.invite.link], { type: "text/plain" });
         });
+
+        this.linkAutoCopied = true;
       } catch {
         // saving errors are surfaced via the form flash; clipboard errors
         // are recoverable from the summary screen's copy button
@@ -511,59 +539,36 @@ export default class CreateInviteWithRoles extends Component {
   <template>
     <DModal
       class="create-invite-with-roles-modal"
-      @title={{this.title}}
       @closeModal={{@closeModal}}
       @inline={{@inline}}
+      @title={{this.title}}
     >
       <:belowHeader>
         {{#if this.flashText}}
-          <div id="modal-alert" role="alert" class="alert alert-error">
+          <div class="alert alert-error" id="modal-alert" role="alert">
             {{trustHTML this.flashText}}
           </div>
         {{/if}}
       </:belowHeader>
       <:body>
         {{#if (eq this.screen "form")}}
-          <div class="create-invite-with-roles-modal__role">
-            {{#if this.canInviteAdmins}}
-              <fieldset class="create-invite-with-roles-modal__role-toggle">
-                <legend class="sr-only">
-                  {{i18n "user.invited.invite_roles.role_label"}}
-                </legend>
-                {{#each this.roleItems as |item|}}
-                  <label
-                    class="create-invite-with-roles-modal__role-option
-                      {{if (eq this.role item.value) '--active'}}
-                      {{if item.disabled '--disabled'}}"
-                  >
-                    <input
-                      type="radio"
-                      name="invite-role"
-                      value={{item.value}}
-                      checked={{eq this.role item.value}}
-                      disabled={{item.disabled}}
-                      {{on "change" (fn this.onRoleChange item.value)}}
-                    />
-                    {{dIcon item.icon}}
-                    {{item.label}}
-                  </label>
-                {{/each}}
-              </fieldset>
-            {{/if}}
-            <p class="create-invite-with-roles-modal__role-description">
-              {{this.roleDescription}}
-              {{#if this.inviteCreated}}
-                <span class="create-invite-with-roles-modal__role-locked">
-                  {{i18n "user.invited.invite_roles.role_locked"}}
-                </span>
-              {{/if}}
-            </p>
-          </div>
+          {{#if this.canChooseRole}}
+            <div class="create-invite-with-roles-modal__role">
+              <DSegmentedControl
+                class="--full-width"
+                @items={{this.roleItems}}
+                @label="user.invited.invite_roles.role_label"
+                @name="invite-role"
+                @onSelect={{this.onRoleChange}}
+                @value={{this.role}}
+              />
+            </div>
+          {{/if}}
 
           {{#if this.isAdminInvite}}
             <PluginOutlet
-              @name="create-invite-admin-mode"
               @connectorTagName="div"
+              @name="create-invite-admin-mode"
               @outletArgs={{lazyHash
                 invite=this.invite
                 setSubmitDisabled=this.setSubmitDisabled
@@ -571,63 +576,135 @@ export default class CreateInviteWithRoles extends Component {
             />
 
             <Form
+              class={{dConcatClass
+                "create-invite-with-roles-modal__admin-form"
+                (if this.submitDisabled "--disabled" "")
+              }}
               @data={{this.adminFormData}}
-              @onSubmit={{this.onAdminFormSubmit}}
               @onRegisterApi={{this.registerApi}}
-              class="create-invite-with-roles-modal__admin-form"
+              @onSubmit={{this.onAdminFormSubmit}}
               as |form|
             >
               {{#unless this.inviteCreated}}
-                <fieldset class="create-invite-with-roles-modal__staff-role">
-                  <legend
-                    class="create-invite-with-roles-modal__staff-role-label"
-                  >{{i18n
-                      "user.invited.invite_roles.staff_role_label"
-                    }}</legend>
-                  {{#each this.staffRoleItems as |item|}}
-                    <label
-                      class="create-invite-with-roles-modal__staff-role-option"
+                <form.Field
+                  @format="full"
+                  @name="staffRole"
+                  @onSet={{this.onStaffRoleChange}}
+                  @showTitle={{false}}
+                  @title={{this.staffRoleLabel}}
+                  @type="radio-group"
+                  as |field|
+                >
+                  <field.Control
+                    class="--inline"
+                    disabled={{this.submitDisabled}}
+                    @title={{this.staffRoleLabel}}
+                    as |radioGroup|
+                  >
+                    {{#each this.staffRoleItems as |item|}}
+                      <radioGroup.Radio
+                        @value={{item.value}}
+                      >{{item.label}}</radioGroup.Radio>
+                    {{/each}}
+
+                    <p
+                      class="create-invite-with-roles-modal__staff-role-description"
                     >
-                      <input
-                        type="radio"
-                        name="invite-staff-role"
-                        value={{item.value}}
-                        checked={{eq this.staffRole item.value}}
-                        {{on "change" (fn this.onStaffRoleChange item.value)}}
-                      />
-                      {{item.label}}
-                    </label>
-                  {{/each}}
-                </fieldset>
+                      {{this.staffRoleDescription}}
+                    </p>
+                  </field.Control>
+                </form.Field>
               {{/unless}}
 
-              <form.Field
-                @name="email"
-                @type="input-email"
-                @title={{this.emailFieldLabel}}
-                @validation="required"
-                @validate={{this.validateEmail}}
-                @format="full"
-                as |field|
+              <form.ConditionalContent
+                @activeName={{this.delivery}}
+                @onChange={{this.setDelivery}}
+                as |conditional|
               >
-                <field.Control
-                  autofocus="autofocus"
-                  autocomplete="off"
-                  data-1p-ignore
-                  data-lpignore="true"
-                  placeholder={{i18n
-                    "user.invited.invite_roles.email_placeholder"
-                  }}
-                />
-              </form.Field>
+                {{#unless this.inviteCreated}}
+                  <fieldset>
+                    <legend class="form-kit__fieldset-title">{{i18n
+                        "user.invited.invite_roles.invite_by"
+                      }}</legend>
+                    <conditional.Conditions as |Condition|>
+                      <Condition @name="link">{{i18n
+                          "user.invited.invite_roles.invite_by_link"
+                        }}</Condition>
+                      {{#if this.allowEmailInvites}}
+                        <Condition @name="email">{{i18n
+                            "user.invited.invite_roles.invite_by_email"
+                          }}</Condition>
+                      {{/if}}
+                    </conditional.Conditions>
+                  </fieldset>
+                {{/unless}}
+
+                <conditional.Contents as |Content|>
+                  <Content @name="link">
+                    {{#if this.showAdvanced}}
+                      <form.Field
+                        @description={{i18n
+                          "user.invited.invite_roles.restrict_domain_help"
+                        }}
+                        @format="full"
+                        @name="domain"
+                        @title={{i18n
+                          "user.invited.invite_roles.restrict_domain"
+                        }}
+                        @type="input"
+                        @validate={{if
+                          (eq this.delivery "link")
+                          this.validateDomain
+                        }}
+                        as |field|
+                      >
+                        <field.Control
+                          autofocus="autofocus"
+                          placeholder={{i18n
+                            "user.invited.invite_roles.domain_placeholder"
+                          }}
+                        />
+                      </form.Field>
+                    {{/if}}
+                  </Content>
+
+                  <Content @name="email">
+                    <form.Field
+                      @description={{i18n
+                        "user.invited.invite_roles.member_email_help"
+                      }}
+                      @disabled={{this.inviteCreated}}
+                      @format="full"
+                      @name="email"
+                      @title={{this.emailFieldLabel}}
+                      @type="input-email"
+                      @validate={{if
+                        (eq this.delivery "email")
+                        this.validateEmail
+                      }}
+                      @validation={{if (eq this.delivery "email") "required"}}
+                      as |field|
+                    >
+                      <field.Control
+                        autocomplete="off"
+                        data-1p-ignore
+                        data-lpignore="true"
+                        placeholder={{i18n
+                          "user.invited.invite_roles.email_placeholder"
+                        }}
+                      />
+                    </form.Field>
+                  </Content>
+                </conditional.Contents>
+              </form.ConditionalContent>
 
               {{#if this.showAdvanced}}
                 <form.Field
-                  @name="description"
-                  @type="input"
-                  @title={{i18n "user.invited.invite.description"}}
                   @description={{i18n "user.invited.invite.description_help"}}
                   @format="full"
+                  @name="description"
+                  @title={{i18n "user.invited.invite.description"}}
+                  @type="input"
                   @validation={{this.descriptionValidation}}
                   as |field|
                 >
@@ -635,13 +712,13 @@ export default class CreateInviteWithRoles extends Component {
                 </form.Field>
 
                 <form.Field
-                  @name="customMessage"
-                  @type="textarea"
-                  @title={{i18n "user.invited.invite.custom_message"}}
                   @description={{i18n
                     "user.invited.invite.custom_message_help"
                   }}
                   @format="full"
+                  @name="customMessage"
+                  @title={{i18n "user.invited.invite.custom_message"}}
+                  @type="textarea"
                   as |field|
                 >
                   <field.Control
@@ -653,108 +730,112 @@ export default class CreateInviteWithRoles extends Component {
                 </form.Field>
 
                 <ExpiryField
-                  @form={{form}}
                   @created={{this.inviteCreated}}
+                  @form={{form}}
                   @options={{this.expireAfterOptions}}
                 />
               {{/if}}
             </Form>
           {{else}}
             <Form
-              @data={{this.memberFormData}}
-              @onSubmit={{this.onMemberFormSubmit}}
-              @onRegisterApi={{this.registerApi}}
               class="create-invite-with-roles-modal__member-form"
+              @data={{this.memberFormData}}
+              @onRegisterApi={{this.registerApi}}
+              @onSubmit={{this.onMemberFormSubmit}}
               as |form|
             >
-              {{#unless this.inviteCreated}}
-                <fieldset class="create-invite-with-roles-modal__delivery">
-                  <legend
-                    class="create-invite-with-roles-modal__delivery-label"
-                  >{{i18n "user.invited.invite_roles.invite_by"}}</legend>
-                  {{#each
-                    (array
-                      (hash
-                        value="link"
-                        label=(i18n "user.invited.invite_roles.invite_by_link")
-                      )
-                      (hash
-                        value="email"
-                        label=(i18n "user.invited.invite_roles.invite_by_email")
-                      )
-                    )
-                    as |item|
-                  }}
-                    <label
-                      class="create-invite-with-roles-modal__delivery-option"
-                    >
-                      <input
-                        type="radio"
-                        name="invite-delivery"
-                        value={{item.value}}
-                        checked={{eq this.delivery item.value}}
-                        {{on "change" (fn this.setDelivery item.value)}}
-                      />
-                      {{item.label}}
-                    </label>
-                  {{/each}}
-                </fieldset>
-              {{/unless}}
+              <form.ConditionalContent
+                @activeName={{this.delivery}}
+                @onChange={{this.setDelivery}}
+                as |conditional|
+              >
+                {{#unless this.inviteCreated}}
+                  <fieldset>
+                    <legend class="form-kit__fieldset-title">{{i18n
+                        "user.invited.invite_roles.invite_by"
+                      }}</legend>
+                    <conditional.Conditions as |Condition|>
+                      <Condition @name="link">{{i18n
+                          "user.invited.invite_roles.invite_by_link"
+                        }}</Condition>
+                      {{#if this.allowEmailInvites}}
+                        <Condition @name="email">{{i18n
+                            "user.invited.invite_roles.invite_by_email"
+                          }}</Condition>
+                      {{/if}}
+                    </conditional.Conditions>
+                  </fieldset>
+                {{/unless}}
 
-              {{#if (eq this.delivery "email")}}
-                <form.Field
-                  @name="email"
-                  @type="input-email"
-                  @title={{this.emailFieldLabel}}
-                  @description={{i18n
-                    "user.invited.invite_roles.member_email_help"
-                  }}
-                  @validation="required"
-                  @validate={{this.validateEmail}}
-                  @format="full"
-                  @disabled={{this.inviteCreated}}
-                  as |field|
-                >
-                  <field.Control
-                    autocomplete="off"
-                    data-1p-ignore
-                    data-lpignore="true"
-                    placeholder={{i18n
-                      "user.invited.invite_roles.email_placeholder"
-                    }}
-                  />
-                </form.Field>
-              {{else}}
-                <form.Field
-                  @name="domain"
-                  @type="input"
-                  @title={{i18n "user.invited.invite_roles.restrict_domain"}}
-                  @description={{i18n
-                    "user.invited.invite_roles.restrict_domain_help"
-                  }}
-                  @validate={{this.validateDomain}}
-                  @format="full"
-                  as |field|
-                >
-                  <field.Control
-                    autofocus="autofocus"
-                    placeholder={{i18n
-                      "user.invited.invite_roles.domain_placeholder"
-                    }}
-                  />
-                </form.Field>
-              {{/if}}
+                <conditional.Contents as |Content|>
+                  <Content @name="link">
+                    {{#if this.showAdvanced}}
+                      <form.Field
+                        @description={{i18n
+                          "user.invited.invite_roles.restrict_domain_help"
+                        }}
+                        @format="full"
+                        @name="domain"
+                        @title={{i18n
+                          "user.invited.invite_roles.restrict_domain"
+                        }}
+                        @type="input"
+                        @validate={{if
+                          (eq this.delivery "link")
+                          this.validateDomain
+                        }}
+                        as |field|
+                      >
+                        <field.Control
+                          autofocus="autofocus"
+                          placeholder={{i18n
+                            "user.invited.invite_roles.domain_placeholder"
+                          }}
+                        />
+                      </form.Field>
+                    {{/if}}
+                  </Content>
+
+                  <Content @name="email">
+                    <form.Field
+                      @description={{i18n
+                        "user.invited.invite_roles.member_email_help"
+                      }}
+                      @disabled={{this.inviteCreated}}
+                      @format="full"
+                      @name="email"
+                      @title={{this.emailFieldLabel}}
+                      @type="input-email"
+                      @validate={{if
+                        (eq this.delivery "email")
+                        this.validateEmail
+                      }}
+                      @validation={{if (eq this.delivery "email") "required"}}
+                      as |field|
+                    >
+                      <field.Control
+                        autocomplete="off"
+                        data-1p-ignore
+                        data-lpignore="true"
+                        placeholder={{i18n
+                          "user.invited.invite_roles.email_placeholder"
+                        }}
+                      />
+                    </form.Field>
+                  </Content>
+                </conditional.Contents>
+              </form.ConditionalContent>
 
               {{#if this.showAdvanced}}
                 {{#if (eq this.delivery "email")}}
                   <form.Field
-                    @name="customMessage"
-                    @type="textarea"
-                    @title={{i18n "user.invited.invite.custom_message"}}
                     @description={{i18n
                       "user.invited.invite.custom_message_help"
                     }}
                     @format="full"
+                    @name="customMessage"
+                    @title={{i18n "user.invited.invite.custom_message"}}
+                    @type="textarea"
                     as |field|
                   >
                     <field.Control
@@ -766,28 +847,28 @@ export default class CreateInviteWithRoles extends Component {
                   </form.Field>
                 {{else}}
                   <form.Field
+                    @format="small"
                     @name="maxRedemptions"
                     @title={{i18n
                       "user.invited.invite.max_redemptions_allowed"
                     }}
                     @type="input-number"
-                    @format="small"
                     @validation="required"
                     as |field|
                   >
                     <field.Control
-                      min="1"
                       max={{this.maxRedemptionsAllowedLimit}}
+                      min="1"
                     />
                   </form.Field>
                 {{/if}}
 
                 <form.Field
-                  @name="description"
-                  @type="input"
-                  @title={{i18n "user.invited.invite.description"}}
                   @description={{i18n "user.invited.invite.description_help"}}
                   @format="full"
+                  @name="description"
+                  @title={{i18n "user.invited.invite.description"}}
+                  @type="input"
                   @validation={{this.descriptionValidation}}
                   as |field|
                 >
@@ -795,28 +876,28 @@ export default class CreateInviteWithRoles extends Component {
                 </form.Field>
 
                 <ExpiryField
-                  @form={{form}}
                   @created={{this.inviteCreated}}
+                  @form={{form}}
                   @options={{this.expireAfterOptions}}
                 />
 
                 {{#if this.canArriveAtTopic}}
                   <form.Field
-                    @name="inviteToTopic"
-                    @type="custom"
-                    @title={{i18n "user.invited.invite.invite_to_topic"}}
                     @description={{i18n
                       "user.invited.invite_roles.arrive_at_topic_help"
                     }}
                     @format="full"
+                    @name="inviteToTopic"
+                    @title={{i18n "user.invited.invite.invite_to_topic"}}
+                    @type="custom"
                     as |field|
                   >
                     <field.Control>
                       <TopicChooser
-                        @value={{field.value}}
                         @content={{this.topics}}
                         @onChange={{fn this.onChangeTopic field.set}}
                         @options={{hash additionalFilters="status:public"}}
+                        @value={{field.value}}
                       />
                     </field.Control>
                   </form.Field>
@@ -824,18 +905,18 @@ export default class CreateInviteWithRoles extends Component {
 
                 {{#if this.canInviteToGroup}}
                   <form.Field
-                    @name="inviteToGroups"
-                    @type="custom"
-                    @title={{i18n "user.invited.invite.add_to_groups"}}
                     @format="full"
+                    @name="inviteToGroups"
+                    @title={{i18n "user.invited.invite.add_to_groups"}}
+                    @type="custom"
                     as |field|
                   >
                     <field.Control>
                       <GroupChooser
                         @content={{this.allGroups}}
-                        @value={{field.value}}
                         @labelProperty="name"
                         @onChange={{field.set}}
+                        @value={{field.value}}
                       />
                     </field.Control>
                   </form.Field>
@@ -855,7 +936,10 @@ export default class CreateInviteWithRoles extends Component {
             {{/if}}
 
             <div class="create-invite-with-roles-modal__link-share">
-              <ShareOrCopyInviteLink @invite={{this.invite}} />
+              <ShareOrCopyInviteLink
+                @invite={{this.invite}}
+                @isCopied={{this.linkAutoCopied}}
+              />
             </div>
 
             <dl class="create-invite-with-roles-modal__summary-rows">
@@ -881,6 +965,9 @@ export default class CreateInviteWithRoles extends Component {
       <:footer>
         {{#if (eq this.screen "form")}}
           <DButton
+            class="btn-primary save-invite"
+            @action={{this.submitForm}}
+            @disabled={{this.submitDisabled}}
             @icon={{if
               this.inviteCreated
               "check"
@@ -895,44 +982,36 @@ export default class CreateInviteWithRoles extends Component {
                 (i18n "user.invited.invite_roles.create_and_copy")
               )
             }}
-            @action={{this.submitForm}}
-            @disabled={{this.submitDisabled}}
-            class="btn-primary save-invite"
           />
           <DButton
-            @label="user.invited.invite.cancel"
-            @action={{this.cancel}}
             class="btn-transparent cancel-button"
+            disabled={{this.submitDisabled}}
+            @action={{this.cancel}}
+            @label="user.invited.invite.cancel"
           />
-          <DButton
-            @icon="gear"
-            @translatedTitle={{if
-              this.showAdvanced
-              (i18n "user.invited.invite_roles.fewer_options")
-              (i18n "user.invited.invite_roles.more_options")
-            }}
-            @action={{this.toggleAdvanced}}
-            class="btn-default toggle-advanced
-              {{if this.showAdvanced '--active'}}"
+          <AdvancedModeToggle
+            disabled={{this.submitDisabled}}
+            @active={{this.showAdvanced}}
+            @onToggle={{this.toggleAdvanced}}
           />
         {{else if (eq this.screen "summary")}}
           <DButton
-            @translatedLabel={{i18n "user.invited.invite_roles.summary.edit"}}
-            @action={{this.editInvite}}
             class="btn-default edit-invite"
+            @action={{this.editInvite}}
+            @translatedLabel={{i18n "user.invited.invite_roles.summary.edit"}}
           />
           <LinkTo
-            @route="userInvited.show"
+            class="btn btn-default view-invites"
             @models={{array this.currentUser.username_lower "pending"}}
-            class="btn btn-transparent view-invites"
+            @route="userInvited.show"
           >
             {{i18n "user.invited.invite_roles.summary.view_invites"}}
           </LinkTo>
         {{else}}
           <LinkTo
-            @route="userInvited.show"
+            class="btn btn-default view-invites"
             @models={{array this.currentUser.username_lower "pending"}}
-            class="btn btn-transparent view-invites"
+            @route="userInvited.show"
           >
             {{i18n "user.invited.invite_roles.summary.view_invites"}}
           </LinkTo>
@@ -945,10 +1024,10 @@ export default class CreateInviteWithRoles extends Component {
 const ExpiryField = <template>
   {{#if @created}}
     <@form.Field
-      @name="expiresAt"
-      @type="custom"
-      @title={{i18n "user.invited.invite.expires_at"}}
       @format="full"
+      @name="expiresAt"
+      @title={{i18n "user.invited.invite.expires_at"}}
+      @type="custom"
       @validation="required"
       as |field|
     >
@@ -963,10 +1042,10 @@ const ExpiryField = <template>
     </@form.Field>
   {{else}}
     <@form.Field
-      @name="expiresAfterDays"
-      @type="select"
-      @title={{i18n "user.invited.invite.expires_after"}}
       @format="full"
+      @name="expiresAfterDays"
+      @title={{i18n "user.invited.invite.expires_after"}}
+      @type="select"
       @validation="required"
       as |field|
     >
@@ -989,21 +1068,22 @@ class ShareOrCopyInviteLink extends Component {
 
   <template>
     <input
-      name="invite-link"
-      type="text"
       class="invite-link"
-      value={{@invite.link}}
+      name="invite-link"
       readonly={{true}}
+      type="text"
+      value={{@invite.link}}
     />
     {{#if (canNativeShare this.capabilities)}}
       <DButton
         class="btn-primary"
+        @action={{this.nativeShare}}
         @icon="share"
         @translatedLabel={{i18n "user.invited.invite.share_link"}}
-        @action={{this.nativeShare}}
       />
     {{else}}
       <DCopyButton
+        @isCopied={{@isCopied}}
         @selector="input.invite-link"
         @translatedLabel={{i18n "user.invited.invite.copy_link"}}
         @translatedLabelAfterCopy={{i18n "user.invited.invite.link_copied"}}

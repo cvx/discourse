@@ -10,8 +10,6 @@ gl:
       dashboard:
         sections:
           support:
-            filter:
-              all_categories: "Todas as categorías"
             answerers:
               staff: "Equipo"
               member: "Membros"
@@ -20,6 +18,10 @@ gl:
               buckets:
                 lt_1h: "< 1 hora"
   js:
+    discourse_workflows:
+      solution_changed:
+        changes_removed: "Retirado"
+        tag_names: "Etiquetas"
     notifications:
       alt:
         solved:
@@ -33,6 +35,12 @@ gl:
       confirm_solved_removal_cancel: "Cancelar"
       shared_issue:
         label_with_count: "%{label} (%{count})"
+    admin:
+      reports:
+        related_items:
+          labels:
+            topic: "Tema"
+            category: "Categoría"
     discourse_automation:
       triggerables:
         first_accepted_solution:

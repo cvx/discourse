@@ -12,12 +12,43 @@ import ReactionsActionSummary from "../components/discourse-reactions-actions-su
 
 replaceIcon("notification.reaction", "bell");
 
-function initializeDiscourseReactions(api, siteSettings) {
-  customizePostMenu(api, siteSettings);
+function initializeDiscourseReactions(api) {
+  customizePostMenu(api);
 
-  api.addKeyboardShortcut("l", null, {
-    click: ".topic-post.selected .discourse-reactions-reaction-button",
-  });
+  for (const [section, link] of [
+    [
+      "activity",
+      { name: "activity-reactions", route: "userActivity.reactions" },
+    ],
+    [
+      "notifications",
+      {
+        name: "notifications-reactions",
+        route: "userNotifications.reactionsReceived",
+      },
+    ],
+  ]) {
+    api.addUserNavSidebarLink(section, {
+      ...link,
+      label: "discourse_reactions.reactions_title",
+      icon: "far-face-smile",
+      displayed: ({ siteSettings }) => siteSettings.discourse_reactions_enabled,
+    });
+  }
+
+  api.addKeyboardShortcut(
+    "l",
+    () => {
+      document
+        .querySelector(
+          ".topic-post.selected .discourse-reactions-reaction-button"
+        )
+        ?.click();
+    },
+    {
+      context: ".topic-post.selected .discourse-reactions-reaction-button",
+    }
+  );
 
   api.addTrackedPostProperties(
     "current_user_used_main_reaction",
@@ -157,18 +188,14 @@ function initializeDiscourseReactions(api, siteSettings) {
   }
 }
 
-function customizePostMenu(api, siteSettings) {
+function customizePostMenu(api) {
   api.registerValueTransformer(
     "post-menu-buttons",
     ({ value: dag, context: { buttonKeys } }) => {
       dag.replace(buttonKeys.LIKE, ReactionsActionButton);
-      dag.add(
-        "discourse-reactions-actions",
-        ReactionsActionSummary,
-        siteSettings.enable_new_post_reply_count_position
-          ? { before: buttonKeys.REPLIES }
-          : { after: buttonKeys.REPLIES }
-      );
+      dag.add("discourse-reactions-actions", ReactionsActionSummary, {
+        before: buttonKeys.REPLIES,
+      });
     }
   );
 }
@@ -180,7 +207,7 @@ export default {
     const siteSettings = container.lookup("service:site-settings");
 
     if (siteSettings.discourse_reactions_enabled) {
-      withPluginApi((api) => initializeDiscourseReactions(api, siteSettings));
+      withPluginApi(initializeDiscourseReactions);
     }
   },
 

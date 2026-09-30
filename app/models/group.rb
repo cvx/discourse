@@ -37,6 +37,7 @@ class Group < ActiveRecord::Base
   has_many :group_requests, dependent: :destroy
   has_many :group_mentions, dependent: :destroy
   has_many :group_associated_groups, dependent: :destroy
+  has_many :mcp_group_scopes, dependent: :destroy
 
   has_many :group_archived_messages, dependent: :destroy
 
@@ -483,11 +484,31 @@ class Group < ActiveRecord::Base
       result = result.where("topics.category_id = ?", opts[:category_id].to_i)
     end
 
+    result =
+      result.where.not(
+        topics: {
+          id: SharedDraft.select(:topic_id),
+        },
+      ) if !guardian.can_see_shared_draft?
+
     result = guardian.filter_allowed_categories(result)
     result = guardian.filter_hidden_posts(result)
-    result = result.where("posts.id < ?", opts[:before_post_id].to_i) if opts[:before_post_id]
+    if opts[:before_post_id]
+      before_post_id = opts[:before_post_id].to_i
+      before_post_created_at = result.where(posts: { id: before_post_id }).pick("posts.created_at")
+      result =
+        if before_post_created_at
+          result.where(
+            "(posts.created_at, posts.id) < (:created_at, :id)",
+            created_at: before_post_created_at,
+            id: before_post_id,
+          )
+        else
+          result.none
+        end
+    end
     result = result.where("posts.created_at < ?", opts[:before].to_datetime) if opts[:before]
-    result.order("posts.created_at desc")
+    result.order("posts.created_at DESC, posts.id DESC")
   end
 
   def self.trust_group_ids
@@ -646,21 +667,20 @@ class Group < ActiveRecord::Base
   end
 
   def self.reset_groups_user_count!(only_group_ids: [])
-    where_sql =
-      if only_group_ids.present?
-        "WHERE group_id IN (#{only_group_ids.map(&:to_i).join(",")}) AND user_id > 0"
-      else
-        "WHERE user_id > 0"
-      end
+    params = { auto_group_ids: AUTO_GROUP_IDS.keys }
+    params[:only_group_ids] = only_group_ids.map(&:to_i) if only_group_ids.present?
 
-    DB.exec <<-SQL
+    DB.exec(<<~SQL, params)
       WITH tally AS (
         SELECT
-          group_id,
-          COUNT(user_id) users
-        FROM group_users
-        #{where_sql}
-        GROUP BY group_id
+          g.id AS group_id,
+          COUNT(gu.user_id) AS users
+        FROM groups g
+        LEFT JOIN group_users gu
+          ON gu.group_id = g.id
+         AND (gu.user_id > 0 OR (g.automatic AND g.id NOT IN (:auto_group_ids)))
+        #{"WHERE g.id IN (:only_group_ids)" if params[:only_group_ids]}
+        GROUP BY g.id
       )
       UPDATE groups
          SET user_count = tally.users
@@ -769,6 +789,14 @@ class Group < ActiveRecord::Base
     relation
   end
 
+  def self.find_by_id_or_name(value)
+    value = value.to_s.strip
+    return if value.blank?
+    return find_by(id: value) if value.match?(/\A\d+\z/)
+
+    find_by("lower(name) = ?", value.downcase)
+  end
+
   def self.lookup_group(name)
     if id = AUTO_GROUPS[name]
       Group.find_by(id: id)
@@ -797,6 +825,32 @@ class Group < ActiveRecord::Base
 
   def self.desired_trust_level_groups(trust_level)
     trust_group_ids.keep_if { |id| id == AUTO_GROUPS[:trust_level_0] || (trust_level + 10) >= id }
+  end
+
+  def self.refresh_automatic_groups_for_user!(user)
+    automatic_group_ids = auto_groups_between(:admins, :trust_level_4)
+    groups_by_id = automatic_group_ids.index_with { |group_id| self[AUTO_GROUP_IDS[group_id]] }
+
+    desired_group_ids = desired_trust_level_groups(user.trust_level)
+    desired_group_ids << AUTO_GROUPS[:admins] if user.admin?
+    desired_group_ids << AUTO_GROUPS[:moderators] if user.moderator?
+    desired_group_ids << AUTO_GROUPS[:staff] if user.staff?
+
+    current_group_ids =
+      GroupUser.where(user_id: user.id, group_id: automatic_group_ids).pluck(:group_id)
+
+    Group.transaction do
+      (current_group_ids - desired_group_ids).each do |group_id|
+        GroupUser.find_by!(user_id: user.id, group_id:).destroy!
+        groups_by_id[group_id].trigger_user_removed_event(user)
+      end
+      (desired_group_ids - current_group_ids).each do |group_id|
+        groups_by_id[group_id].group_users.create!(user:)
+        groups_by_id[group_id].trigger_user_added_event(user, true)
+      end
+    end
+
+    user.reload
   end
 
   def self.user_trust_level_change!(user_id, trust_level)
@@ -909,16 +963,18 @@ class Group < ActiveRecord::Base
     GroupManager.new(self).remove(user_ids)
   end
 
+  # Bots in built-in and hand-managed groups are incidental (e.g. the system user
+  # as owner), but automatic groups maintained elsewhere may exist to hold bots.
+  def hides_bot_members?
+    !automatic || AUTO_GROUP_IDS.key?(id)
+  end
+
+  def listed_users
+    hides_bot_members? ? human_users : users
+  end
+
   def recalculate_user_count
-    DB.exec <<~SQL
-      UPDATE groups g
-      SET user_count =
-        (SELECT COUNT(gu.user_id)
-         FROM group_users gu
-         WHERE gu.group_id = g.id
-         AND gu.user_id > 0)
-      WHERE g.id = #{id};
-    SQL
+    Group.reset_user_count(self)
   end
 
   def add_automatically(user, subject: nil)

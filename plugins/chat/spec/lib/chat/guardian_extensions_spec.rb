@@ -225,6 +225,31 @@ RSpec.describe Chat::GuardianExtensions do
       end
     end
 
+    describe "#can_preview_anonymous_public_chat_channel?" do
+      before do
+        SiteSetting.enable_public_channels = true
+        SiteSetting.chat_allowed_groups =
+          "#{Group::AUTO_GROUPS[:everyone]}|#{Group::AUTO_GROUPS[:anonymous_users]}"
+      end
+
+      it "returns true for channels backed by categories anonymous users can see" do
+        expect(guardian.can_preview_anonymous_public_chat_channel?(channel)).to eq(true)
+      end
+
+      it "returns false for private category channels visible only to the user" do
+        category =
+          Fabricate(
+            :private_category,
+            group: Fabricate(:group, users: [user]),
+            permission_type: CategoryGroup.permission_types[:readonly],
+          )
+        channel.update!(chatable: category)
+
+        expect(guardian.can_preview_chat_channel?(channel)).to eq(true)
+        expect(guardian.can_preview_anonymous_public_chat_channel?(channel)).to eq(false)
+      end
+    end
+
     describe "#can_post_in_chatable?" do
       alias_matcher :be_able_to_post_in_chatable, :be_can_post_in_chatable
 
@@ -568,6 +593,19 @@ RSpec.describe Chat::GuardianExtensions do
 
             context "when group moderation is enabled" do
               before { SiteSetting.enable_category_group_moderation = true }
+
+              it "disallows a silenced group moderator from restoring" do
+                moderator = Fabricate(:user)
+                mods = Fabricate(:group)
+                mods.add(moderator)
+                Fabricate(:category_moderation_group, category: chatable, group: mods)
+
+                expect(Guardian.new(moderator).can_restore_chat?(message, chatable)).to eq(true)
+
+                UserSilencer.new(moderator).silence
+
+                expect(Guardian.new(moderator).can_restore_chat?(message, chatable)).to eq(false)
+              end
 
               it "allows a group moderator to restore" do
                 moderator = Fabricate(:user)
@@ -993,6 +1031,19 @@ RSpec.describe Chat::GuardianExtensions do
 
     context "when target user has disabled private messages" do
       before { other_user.user_option.update(allow_private_messages: false) }
+
+      it "returns false" do
+        expect(guardian).not_to be_able_to_receive_direct_message(other_user)
+      end
+    end
+
+    context "when target user only allows private messages from other users" do
+      fab!(:allowed_user, :user)
+
+      before do
+        other_user.user_option.update!(enable_allowed_pm_users: true)
+        AllowedPmUser.create!(user: other_user, allowed_pm_user: allowed_user)
+      end
 
       it "returns false" do
         expect(guardian).not_to be_able_to_receive_direct_message(other_user)

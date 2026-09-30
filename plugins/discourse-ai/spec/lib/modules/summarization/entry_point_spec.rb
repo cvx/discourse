@@ -49,6 +49,7 @@ RSpec.describe DiscourseAi::Summarization::EntryPoint do
       describe "topic_list_item serializer's ai_summary" do
         context "when hot topic summarization is disabled" do
           before { SiteSetting.ai_summary_gists_enabled = false }
+
           it "doesn't include summaries" do
             gist_topic = topic_query.list_hot.topics.find { |t| t.id == topic_ai_gist.target_id }
 
@@ -82,7 +83,7 @@ RSpec.describe DiscourseAi::Summarization::EntryPoint do
             expect(serialized[:ai_topic_gist]).to be_present
           end
 
-          it "selects the localized gist and respects the show-original preference" do
+          it "selects the localized gist and respects the automatic-translation preference" do
             topic_ai_gist.target.update!(locale: "en")
             english_gist =
               topic_ai_gist.tap { |gist| gist.update!(summarized_text: "English gist") }
@@ -109,7 +110,7 @@ RSpec.describe DiscourseAi::Summarization::EntryPoint do
 
             expect(serialized[:ai_topic_gist]).to eq(japanese_gist.summarized_text)
 
-            user.user_option.update!(show_original_content: true)
+            user.user_option.update!(automatically_translate: false)
             original_serialized =
               TopicListItemSerializer.new(
                 gist_topic,

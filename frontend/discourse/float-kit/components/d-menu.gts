@@ -3,20 +3,19 @@ import { concat } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { getOwner } from "@ember/owner";
-import { service } from "@ember/service";
 import { type ComponentLike } from "@glint/template";
 import curryComponent from "ember-curry-component";
 import { modifier } from "ember-modifier";
 import DFloatBody from "discourse/float-kit/components/d-float-body";
 import {
   type FloatCallback,
+  type FloatCloseOptions,
   MENU,
   type MenuOptions,
 } from "discourse/float-kit/lib/constants";
 import DMenuInstance from "discourse/float-kit/lib/d-menu-instance";
+import FloatKitNotifyPositioned from "discourse/float-kit/modifiers/notify-positioned";
 import { isTesting } from "discourse/lib/environment";
-import type Site from "discourse/models/site";
-import { and } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
 import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
@@ -24,13 +23,23 @@ import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 /** The object yielded to each of the menu's blocks and passed to a rendered component. */
 export interface DMenuComponentArgs<Data = unknown> {
   /** Closes the menu. */
-  close: FloatCallback;
+  close: (options?: FloatCloseOptions) => Promise<void>;
 
   /** Opens the menu. */
   show: FloatCallback;
 
   /** The `@data` passed to the menu. */
   data?: Data;
+
+  /** Whether the menu is currently open — reflects the live instance state. */
+  expanded: boolean;
+
+  /**
+   * Whether the menu is disabled — reflects the live instance state. A custom
+   * `@triggerComponent` does not receive `@disabled` itself, so this is how it renders a
+   * disabled affordance for the veto that `<DMenu>` is already applying.
+   */
+  disabled: boolean;
 }
 
 // The subset of arguments that mirror a menu's option bag. Built as a
@@ -47,13 +56,18 @@ type DMenuOptionArgs<Data> = Partial<
   data?: Data;
 
   /** A component rendered as the content; it receives the `@data` and `@close` arguments. */
-  component?: ComponentLike<{ Args: { data?: Data; close?: FloatCallback } }>;
+  component?: ComponentLike<{
+    Args: {
+      data?: Data;
+      close?: (options?: FloatCloseOptions) => Promise<void>;
+    };
+  }>;
 
   /** Called with the menu instance when it is created, so callers can control it programmatically. */
   onRegisterApi?: (instance: DMenuInstance) => void;
 };
 
-interface DMenuSignature<Data = unknown> {
+export interface DMenuSignature<Data = unknown> {
   Element: HTMLElement;
   Args: DMenuOptionArgs<Data> & {
     // Arguments the component reads directly and forwards to the trigger button;
@@ -77,7 +91,18 @@ interface DMenuSignature<Data = unknown> {
     /** The title for the default trigger button. */
     title?: string;
 
-    /** Whether the default trigger button is disabled. */
+    /**
+     * Disables the menu: the default trigger button renders disabled, and — for any trigger,
+     * including a custom `@triggerComponent` — a trigger event (click/focus/hover/hold) no longer
+     * opens the menu. It does not touch the trigger's focusability or ARIA; that stays the
+     * caller's concern. A custom trigger reads the state back through `componentArgs.disabled`.
+     *
+     * Becoming disabled while open also closes the menu, since a disabled control must not keep
+     * an interactive overlay live. Where focus lands afterwards follows from the trigger: the
+     * default button is natively `disabled`, which no element can hold focus while being, so
+     * focus falls to the document. A caller that needs focus preserved supplies a trigger that
+     * stays focusable — the close refocuses it.
+     */
     disabled?: boolean;
 
     /** Whether the default trigger button shows a loading state. */
@@ -106,8 +131,6 @@ interface DMenuSignature<Data = unknown> {
 export default class DMenu<Data = unknown> extends Component<
   DMenuSignature<Data>
 > {
-  @service declare site: Site;
-
   menuInstance = new DMenuInstance(getOwner(this)!, {
     ...this.allowedProperties,
     autoUpdate: true,
@@ -119,7 +142,9 @@ export default class DMenu<Data = unknown> extends Component<
     this.options.onRegisterApi?.(this.menuInstance);
 
     return () => {
-      this.menuInstance.destroy();
+      if (this.isDestroying) {
+        this.menuInstance.destroy();
+      }
     };
   });
 
@@ -131,47 +156,39 @@ export default class DMenu<Data = unknown> extends Component<
     };
   });
 
+  // Keeps the instance's open-veto in sync with `@disabled` reactively. The instance wires its
+  // trigger listeners once (at registration), so the disabled state cannot ride in through the
+  // one-time options snapshot; this re-runs whenever `@disabled` changes and gates the open.
+  // Becoming disabled while open also closes the menu — a disabled control must not keep an
+  // already-open overlay live (its content would stay interactive).
+  syncDisabled = modifier((_element: HTMLElement, [disabled]: [boolean?]) => {
+    const value = disabled ?? false;
+    this.menuInstance.disabled = value;
+    if (value && this.menuInstance.expanded) {
+      this.menuInstance.close();
+    }
+  });
+
   #body: HTMLElement | null = null;
-
-  @action
-  teardownFloatBody() {
-    this.#body = null;
-  }
-
-  @action
-  forwardTabToContent(event: KeyboardEvent) {
-    // need to call the parent handler to allow arrow key navigation to siblings in toolbar contexts
-    const parentHandlerResult = this.args.onKeydown?.(event);
-
-    if (!this.#body) {
-      return parentHandlerResult;
-    }
-
-    if (event.key === "Tab") {
-      event.preventDefault();
-
-      const firstFocusable = this.#body.querySelector<HTMLElement>(
-        'button, a, input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-
-      firstFocusable?.focus();
-      this.#body.focus();
-
-      return true;
-    }
-
-    return parentHandlerResult;
-  }
 
   get options(): MenuOptions {
     return this.menuInstance?.options ?? ({} as MenuOptions);
   }
 
   get componentArgs(): DMenuComponentArgs<Data> {
+    const instance = this.menuInstance;
     return {
-      close: this.menuInstance.close,
-      show: this.menuInstance.show,
+      close: instance.close,
+      show: instance.show,
       data: this.options.data as Data,
+      // Getters (not snapshots) so a consumer reading these subscribes to the live tracked
+      // state and re-renders as it changes, without churning this object.
+      get expanded() {
+        return instance.expanded;
+      },
+      get disabled() {
+        return instance.disabled;
+      },
     };
   }
 
@@ -210,17 +227,60 @@ export default class DMenu<Data = unknown> extends Component<
     }>;
   }
 
+  /**
+   * Filling the gaps with defaults here would produce the same merged options, but it would erase
+   * the difference between "left unset" and "explicitly set to the default", which the instance
+   * needs in order to let one option imply another.
+   *
+   * @returns Only the options the caller supplied, keyed as in `MENU.options`.
+   */
   get allowedProperties() {
     const properties: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(MENU.options)) {
-      properties[key] = (this.args as Record<string, unknown>)[key] ?? value;
+    for (const key of Object.keys(MENU.options)) {
+      const value = (this.args as Record<string, unknown>)[key];
+      if (value != null) {
+        properties[key] = value;
+      }
     }
     return properties;
   }
 
+  @action
+  teardownFloatBody() {
+    this.#body = null;
+  }
+
+  @action
+  forwardTabToContent(event: KeyboardEvent) {
+    // need to call the parent handler to allow arrow key navigation to siblings in toolbar contexts
+    const parentHandlerResult = this.args.onKeydown?.(event);
+
+    // Inline ordering owns Tab on the trigger, in the capture phase, and decides whether the
+    // panel is entered. Pulling focus into the body here would override a decision to pass over
+    // a panel that offers no stop.
+    if (!this.#body || this.options.inlineTabOrder) {
+      return parentHandlerResult;
+    }
+
+    if (event.key === "Tab") {
+      event.preventDefault();
+
+      const firstFocusable = this.#body.querySelector<HTMLElement>(
+        'button, a, input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+
+      firstFocusable?.focus();
+      this.#body.focus();
+
+      return true;
+    }
+
+    return parentHandlerResult;
+  }
+
   <template>
     <this.triggerComponent
-      {{this.registerTrigger}}
+      aria-expanded={{if this.menuInstance.expanded "true" "false"}}
       class={{dConcatClass
         "fk-d-menu__trigger"
         (if this.menuInstance.expanded "-expanded")
@@ -228,13 +288,14 @@ export default class DMenu<Data = unknown> extends Component<
         @triggerClass
         @class
       }}
-      id={{this.menuInstance.id}}
       data-identifier={{this.options.identifier}}
       data-trigger
-      aria-expanded={{if this.menuInstance.expanded "true" "false"}}
-      {{on "keydown" this.forwardTabToContent}}
-      @componentArgs={{this.componentArgs}}
+      id={{this.menuInstance.id}}
       ...attributes
+      @componentArgs={{this.componentArgs}}
+      {{this.registerTrigger}}
+      {{this.syncDisabled @disabled}}
+      {{on "keydown" this.forwardTabToContent}}
     >
       {{#if (has-block "trigger")}}
         {{yield this.componentArgs to="trigger"}}
@@ -242,30 +303,32 @@ export default class DMenu<Data = unknown> extends Component<
     </this.triggerComponent>
 
     {{#if this.menuInstance.expanded}}
-      {{#if (and this.site.mobileView this.options.modalForMobile)}}
+      {{#if this.menuInstance.renderInModal}}
         <DModal
-          @closeModal={{this.menuInstance.close}}
-          @hideHeader={{true}}
-          @autofocus={{this.options.autofocus}}
+          aria-label={{this.options.ariaLabel}}
           class={{dConcatClass
             "fk-d-menu-modal"
             (concat this.options.identifier "-content")
             @contentClass
             @class
           }}
-          @inline={{(isTesting)}}
-          data-identifier={{this.options.identifier}}
           data-content
+          data-identifier={{this.options.identifier}}
+          @autofocus={{this.options.autofocus}}
+          @closeModal={{this.menuInstance.close}}
+          @hideHeader={{true}}
+          @inline={{(isTesting)}}
+          {{FloatKitNotifyPositioned this.menuInstance}}
         >
-          <div class="fk-d-menu-modal__grip" aria-hidden="true"></div>
+          <div aria-hidden="true" class="fk-d-menu-modal__grip"></div>
           {{#if (has-block)}}
             {{yield this.componentArgs}}
           {{else if (has-block "content")}}
             {{yield this.componentArgs to="content"}}
           {{else if this.options.component}}
             <this.options.component
-              @data={{this.options.data}}
               @close={{this.menuInstance.close}}
+              @data={{this.options.data}}
             />
           {{else if this.options.content}}
             {{this.options.content}}
@@ -273,17 +336,18 @@ export default class DMenu<Data = unknown> extends Component<
         </DModal>
       {{else}}
         <DFloatBody
+          @inline={{this.options.inline}}
+          @inlineTabOrder={{this.options.inlineTabOrder}}
+          @innerClass="fk-d-menu__inner-content"
           @instance={{this.menuInstance}}
-          @trapTab={{this.options.trapTab}}
           @mainClass={{dConcatClass
             "fk-d-menu"
             (concat this.options.identifier "-content")
             @class
             @contentClass
           }}
-          @innerClass="fk-d-menu__inner-content"
-          @role="dialog"
-          @inline={{this.options.inline}}
+          @role={{this.options.contentRole}}
+          @trapTab={{this.options.trapTab}}
           {{this.registerFloatBody}}
         >
           {{#if (has-block)}}
@@ -292,8 +356,8 @@ export default class DMenu<Data = unknown> extends Component<
             {{yield this.componentArgs to="content"}}
           {{else if this.options.component}}
             <this.options.component
-              @data={{this.options.data}}
               @close={{this.menuInstance.close}}
+              @data={{this.options.data}}
             />
           {{else if this.options.content}}
             {{this.options.content}}

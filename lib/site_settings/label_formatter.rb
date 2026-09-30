@@ -148,6 +148,10 @@ module SiteSettings
         expand_setting_links(desc)
       end
 
+      def setting_markers(settings)
+        Array(settings).map { "{{setting:#{it}}}" }.join(", ")
+      end
+
       def settings_filter_href(filter)
         "#{Discourse.base_path}/admin/site_settings/category/all_results?filter=#{CGI.escape(filter)}"
       end
@@ -270,7 +274,7 @@ module SiteSettings
         if translated_keywords.is_a?(Array)
           return(
             (
-              translated_keywords + [SiteSetting.deprecated_setting_alias(setting)] +
+              translated_keywords + SiteSetting.deprecated_setting_aliases(setting) +
                 english_translated_keywords
             ).compact
           )
@@ -278,7 +282,7 @@ module SiteSettings
 
         translated_keywords
           .split("|")
-          .concat([SiteSetting.deprecated_setting_alias(setting)] + english_translated_keywords)
+          .concat(SiteSetting.deprecated_setting_aliases(setting) + english_translated_keywords)
           .compact
       end
 

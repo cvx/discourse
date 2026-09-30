@@ -32,19 +32,11 @@ module Chat
         @chat_separate_sidebar_mode ||= { default: 0, never: 1, always: 2, fullscreen: 3 }
       end
 
-      def base.chat_send_shortcut
-        @chat_send_shortcut ||= { enter: 0, meta_enter: 1 }
-      end
-
       # Avoid attempting to override when autoloading
       if !base.method_defined?(:chat_separate_sidebar_mode_default?)
         base.enum :chat_separate_sidebar_mode,
                   base.chat_separate_sidebar_mode,
                   prefix: "chat_separate_sidebar_mode"
-      end
-
-      if !base.method_defined?(:chat_send_shortcut_enter?)
-        base.enum :chat_send_shortcut, base.chat_send_shortcut, prefix: "chat_send_shortcut"
       end
 
       if !base.method_defined?(:show_thread_title_prompts?)
@@ -61,6 +53,67 @@ module Chat
 
       if !base.method_defined?(:chat_quick_reaction_type_frequent?)
         base.enum :chat_quick_reaction_type, { frequent: 0, custom: 1 }, prefix: true
+      end
+
+      def base.chat_channel_list_filters
+        @chat_channel_list_filters ||= { all: 0, active: 1, unread: 2, mentions: 3 }
+      end
+
+      if !base.method_defined?(:chat_channel_list_filter_all?)
+        base.enum :chat_channel_list_filter,
+                  base.chat_channel_list_filters,
+                  prefix: true,
+                  scopes: false,
+                  validate: true
+      end
+
+      if !base.method_defined?(:chat_channel_list_filter_starred_all?)
+        base.enum :chat_channel_list_filter_starred,
+                  base.chat_channel_list_filters,
+                  prefix: true,
+                  scopes: false,
+                  validate: true
+      end
+
+      if !base.method_defined?(:chat_channel_list_filter_dms_all?)
+        base.enum :chat_channel_list_filter_dms,
+                  base.chat_channel_list_filters,
+                  prefix: true,
+                  scopes: false,
+                  validate: true
+      end
+
+      def base.chat_channel_list_sorts
+        @chat_channel_list_sorts ||= { alphabetical: 0, recent_activity: 1, priority: 2 }
+      end
+
+      if !base.method_defined?(:chat_channel_list_sort_alphabetical?)
+        base.enum :chat_channel_list_sort,
+                  base.chat_channel_list_sorts,
+                  prefix: true,
+                  scopes: false,
+                  validate: true
+      end
+
+      if !base.method_defined?(:chat_channel_list_sort_starred_alphabetical?)
+        base.enum :chat_channel_list_sort_starred,
+                  base.chat_channel_list_sorts,
+                  prefix: true,
+                  scopes: false,
+                  validate: true
+      end
+
+      if !base.method_defined?(:chat_channel_list_sort_dms_alphabetical?)
+        base.enum :chat_channel_list_sort_dms,
+                  base.chat_channel_list_sorts,
+                  prefix: true,
+                  scopes: false,
+                  validate: true
+      end
+
+      if !base.method_defined?(:chat_send_shortcut)
+        base.define_method(:chat_send_shortcut) { send_shortcut }
+        base.define_method(:chat_send_shortcut=) { |value| self.send_shortcut = value }
       end
     end
   end

@@ -16,6 +16,88 @@ RSpec.describe SiteSerializer do
     end
   end
 
+  describe "post_action_types" do
+    it "marks flags as system when they come from registered flag settings" do
+      # Plugins can replace flag settings, which makes the payload serialize
+      # PostActionType records instead of Flag records. The admin UI keys
+      # editability off `system`, so it has to be present on both paths.
+      settings = FlagSettings.new
+      settings.add(4, :inappropriate)
+      settings.add(99, :custom_plugin_flag, name: "Custom plugin flag")
+      PostActionType.replace_flag_settings(settings)
+      # Expire the cached payload without resetting the settings we just registered.
+      PostActionType.new.expire_cache
+      Site.clear_cache
+
+      serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
+
+      expect(serialized[:post_action_types]).to be_present
+      expect(serialized[:post_action_types].map { |type| type[:system] }.uniq).to eq([true])
+    ensure
+      PostActionType.replace_flag_settings(nil)
+      Flag.reset_flag_settings!
+    end
+  end
+
+  describe "#homepage_choices" do
+    around do |example|
+      registrations = DiscoursePluginRegistry._raw_homepage_options.dup
+      example.run
+      DiscoursePluginRegistry._raw_homepage_options.replace(registrations)
+    end
+
+    it "exposes the eligible homepage choices" do
+      serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
+      expect(serialized[:homepage_choices]).to eq(HomepageSiteSetting.choices)
+    end
+
+    it "exposes registered homepage paths" do
+      plugin = Plugin::Instance.new
+      plugin.stubs(:enabled?).returns(true)
+      plugin.register_homepage(
+        "directory",
+        name: "discourse_directory.navigation.title",
+        path: "/directory",
+        route: "discourse_directory/directory#index",
+      )
+
+      serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
+
+      expect(serialized[:homepage_choices]).to include("directory")
+      expect(serialized[:homepage_options]).to include(
+        id: "directory",
+        path: "/directory",
+        server_side: false,
+      )
+    end
+  end
+
+  describe "#anonymous_list_filters" do
+    it "exposes the filters an anonymous visitor can request" do
+      serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
+
+      expect(serialized[:anonymous_list_filters]).to include("latest", "top", "hot")
+      expect(serialized[:anonymous_list_filters]).not_to include("unread")
+      # an anonymous menu item, but not a list filter
+      expect(serialized[:anonymous_list_filters]).not_to include("categories")
+    end
+  end
+
+  describe "#can_search" do
+    it "exposes whether the current user can search" do
+      SiteSetting.allow_anonymous_search = false
+
+      anonymous_payload =
+        described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
+      user_guardian = Guardian.new(Fabricate(:user))
+      user_payload =
+        described_class.new(Site.new(user_guardian), scope: user_guardian, root: false).as_json
+
+      expect(anonymous_payload[:can_search]).to eq(false)
+      expect(user_payload[:can_search]).to eq(true)
+    end
+  end
+
   describe "#user_tips" do
     it "is included if enable_user_tips" do
       SiteSetting.enable_user_tips = true
@@ -53,6 +135,12 @@ RSpec.describe SiteSerializer do
       end
     end
 
+    around do |example|
+      stub_const(target_class, :ACL_PERMISSIONS, Acl::Permissions.new(:edit, :manage)) do
+        example.run
+      end
+    end
+
     after { DiscoursePluginRegistry.reset_register!(:acl_target_classes) }
 
     it "includes mandatory ACLs by target class" do
@@ -80,22 +168,21 @@ RSpec.describe SiteSerializer do
     end
 
     it "includes plugin-registered target classes" do
-      Object.const_set(:SiteSerializerSpecTarget, target_class)
-      AclTarget.loaded_target_classes.delete(target_class)
-      DiscoursePluginRegistry.register_acl_target_class(
-        "SiteSerializerSpecTarget",
-        Plugin::Instance.new,
-      )
+      stub_const(Object, :SiteSerializerSpecTarget, target_class) do
+        AclTarget.loaded_target_classes.delete(target_class)
+        DiscoursePluginRegistry.register_acl_target_class(
+          "SiteSerializerSpecTarget",
+          Plugin::Instance.new,
+        )
 
-      serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
+        serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
 
-      expect(serialized.dig(:access_control, :mandatory_acl)).to include(
-        "SiteSerializerSpecTarget" => [
-          { type: :group, id: Group::AUTO_GROUPS[:admins], permission: "manage" },
-        ],
-      )
-    ensure
-      Object.send(:remove_const, :SiteSerializerSpecTarget) if defined?(SiteSerializerSpecTarget)
+        expect(serialized.dig(:access_control, :mandatory_acl)).to include(
+          "SiteSerializerSpecTarget" => [
+            { type: :group, id: Group::AUTO_GROUPS[:admins], permission: "manage" },
+          ],
+        )
+      end
     end
   end
 
@@ -119,29 +206,7 @@ RSpec.describe SiteSerializer do
     Site.reset_preloaded_category_custom_fields
   end
 
-  it "includes category tags" do
-    tag = Fabricate(:tag)
-    tag_group = Fabricate(:tag_group)
-    tag_group_2 = Fabricate(:tag_group)
-
-    category.tags << tag
-    category.tag_groups << tag_group
-    category.update!(
-      category_required_tag_groups: [
-        CategoryRequiredTagGroup.new(tag_group: tag_group_2, min_count: 1),
-      ],
-    )
-
-    serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
-    c1 = serialized[:categories].find { |c| c[:id] == category.id }
-
-    expect(c1[:allowed_tags]).to contain_exactly({ id: tag.id, name: tag.name, slug: tag.slug })
-    expect(c1[:allowed_tag_groups]).to contain_exactly(tag_group.name)
-    expect(c1[:required_tag_groups]).to eq([{ name: tag_group_2.name, min_count: 1 }])
-  end
-
   it "doesn't explode when category_required_tag_group is missing" do
-    tag = Fabricate(:tag)
     tag_group = Fabricate(:tag_group)
     crtg = CategoryRequiredTagGroup.new(tag_group: tag_group, min_count: 1)
     category.update!(category_required_tag_groups: [crtg])
@@ -149,9 +214,9 @@ RSpec.describe SiteSerializer do
     tag_group.delete # Bypassing hooks like this should never happen in the app
 
     serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
-    c1 = serialized[:categories].find { |c| c[:id] == category.id }
+    serialized_category = serialized[:categories].find { |c| c[:id] == category.id }
 
-    expect(c1[:required_tag_groups]).to eq([{ name: nil, min_count: 1 }])
+    expect(serialized_category[:required_tag_groups]).to eq([{ min_count: 1 }])
   end
 
   it "returns correct notification level for categories" do
@@ -452,7 +517,7 @@ RSpec.describe SiteSerializer do
       Fabricate(:tag_group, permissions: { "staff" => 1 }, tag_names: [hidden_tag.name])
     end
 
-    it "should return the site's top tags as the default tags for sidebar" do
+    it "returns the site's top tags as default sidebar tags" do
       serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
 
       expect(serialized[:navigation_menu_site_top_tags]).to eq(
@@ -482,7 +547,7 @@ RSpec.describe SiteSerializer do
       )
     end
 
-    it "should not be serialized if `tagging_enabled` site setting is set to false" do
+    it "is not serialized when tagging is disabled" do
       SiteSetting.set(:tagging_enabled, false)
 
       serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json
@@ -490,7 +555,7 @@ RSpec.describe SiteSerializer do
       expect(serialized[:navigation_menu_site_top_tags]).to eq(nil)
     end
 
-    it "should use slug_for_url for tags with empty slugs" do
+    it "uses slug_for_url for tags with empty slugs" do
       numeric_tag =
         Fabricate(:tag, name: "1").tap { |tag| Fabricate.times(10, :topic, tags: [tag]) }
 
@@ -503,7 +568,7 @@ RSpec.describe SiteSerializer do
       expect(numeric_entry[:slug]).to eq("#{numeric_tag.id}-tag")
     end
 
-    it "should return an empty array if site has no top tags" do
+    it "returns an empty array when the site has no top tags" do
       Tag.delete_all
 
       serialized = described_class.new(Site.new(guardian), scope: guardian, root: false).as_json

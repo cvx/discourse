@@ -2,6 +2,20 @@
 
 require "extralite"
 
+class RecordingChannel
+  attr_reader :progress, :warnings, :errors
+
+  def initialize
+    @progress = @warnings = @errors = 0
+  end
+
+  def report_progress(progress:, warnings:, errors:)
+    @progress += progress
+    @warnings += warnings
+    @errors += errors
+  end
+end
+
 RSpec.describe Migrations::Conversion::StepRunner do
   around do |example|
     Dir.mktmpdir do |dir|
@@ -11,25 +25,12 @@ RSpec.describe Migrations::Conversion::StepRunner do
       db.execute(
         "CREATE TABLE log_entries (created_at TEXT, type INTEGER, message TEXT, exception TEXT, details TEXT)",
       )
+      db.execute("CREATE TABLE events (kind TEXT)")
       db.close
 
       example.run
     ensure
       Migrations::Database::IntermediateDB.setup(nil)
-    end
-  end
-
-  class RecordingReporter
-    attr_reader :progress, :warnings, :errors
-
-    def initialize
-      @progress = @warnings = @errors = 0
-    end
-
-    def report_progress(progress:, warnings:, errors:)
-      @progress += progress
-      @warnings += warnings
-      @errors += errors
     end
   end
 
@@ -57,7 +58,7 @@ RSpec.describe Migrations::Conversion::StepRunner do
     end
   end
 
-  let(:reporter) { RecordingReporter.new }
+  let(:channel) { RecordingChannel.new }
 
   def shard_rows(table)
     db = Extralite::Database.new(@shard_path)
@@ -73,24 +74,200 @@ RSpec.describe Migrations::Conversion::StepRunner do
     db&.close
   end
 
+  def log_entries
+    db = Extralite::Database.new(@shard_path)
+    db.query("SELECT * FROM log_entries ORDER BY rowid")
+  ensure
+    db&.close
+  end
+
   it "reads the whole source, writes every good row to the shard, and reports progress" do
-    described_class.new(step: step_class.new, shard_path: @shard_path, reporter:).run
+    described_class.new(step: step_class.new, shard_path: @shard_path, channel:).run
 
     expect(shard_rows("notes")).to eq([1, 3])
     expect(shard_count("log_entries")).to eq(1)
 
     # the failed row still counts toward progress
-    expect(reporter.progress).to eq(3)
-    expect(reporter.errors).to eq(1)
+    expect(channel.progress).to eq(3)
+    expect(channel.errors).to eq(1)
   end
 
   it "closes the source when it's done" do
     step = step_class.new
     allow(step.source).to receive(:cleanup).and_call_original
 
-    described_class.new(step:, shard_path: @shard_path, reporter:).run
+    described_class.new(step:, shard_path: @shard_path, channel:).run
 
     expect(step.source).to have_received(:cleanup)
+  end
+
+  it "cleans up the processor when processing fails" do
+    failing_step_class =
+      Class.new(Migrations::Conversion::Step) do
+        source do
+          def items
+            []
+          end
+        end
+
+        processor do
+          def result
+            raise "boom"
+          end
+
+          def cleanup
+            Migrations::Database::IntermediateDB.insert(
+              "INSERT INTO events (kind) VALUES (?)",
+              "processor cleanup",
+            )
+          end
+        end
+      end
+
+    expect do
+      described_class.new(step: failing_step_class.new, shard_path: @shard_path, channel:).run
+    end.to raise_error("boom")
+    expect(shard_count("events")).to eq(1)
+  end
+
+  context "with a batched processor" do
+    # The source records each row it yields, so the log shows that the runner
+    # reads and processes in turns instead of draining the source first.
+    let(:step_class) do
+      Class.new(Migrations::Conversion::Step) do
+        source do
+          def items
+            Enumerator.new do |y|
+              (1..10).each do |id|
+                Migrations::Database::IntermediateDB.insert(
+                  "INSERT INTO events (kind) VALUES (?)",
+                  "read",
+                )
+                y.yield({ id:, body: "ok" })
+              end
+            end
+          end
+        end
+
+        processor do
+          batch_size 4
+
+          def process_batch(items)
+            Migrations::Database::IntermediateDB.insert(
+              "INSERT INTO events (kind) VALUES (?)",
+              "batch:#{items.size}",
+            )
+            items.each do |item|
+              Migrations::Database::IntermediateDB.insert(
+                "INSERT INTO notes (id, body) VALUES (?, ?)",
+                item[:id],
+                item[:body],
+              )
+            end
+          end
+        end
+      end
+    end
+
+    def events
+      db = Extralite::Database.new(@shard_path)
+      db.query_splat("SELECT kind FROM events ORDER BY rowid")
+    ensure
+      db&.close
+    end
+
+    it "reads a slice at a time and counts every item in it" do
+      described_class.new(step: step_class.new, shard_path: @shard_path, channel:).run
+
+      expect(events).to eq(
+        %w[read read read read batch:4 read read read read batch:4 read read batch:2],
+      )
+      expect(shard_rows("notes")).to eq((1..10).to_a)
+      expect(channel.progress).to eq(10)
+      expect(channel.errors).to eq(0)
+    end
+
+    context "when the processor reports its own progress" do
+      let(:step_class) do
+        Class.new(Migrations::Conversion::Step) do
+          source do
+            def items
+              (1..10).map { |id| { id:, body: "ok" } }
+            end
+          end
+
+          processor do
+            batch_size 5
+
+            def process_batch(items)
+              tracker.progress = items.size * 2
+            end
+          end
+        end
+      end
+
+      it "uses that instead of the slice size" do
+        described_class.new(step: step_class.new, shard_path: @shard_path, channel:).run
+
+        expect(channel.progress).to eq(20)
+      end
+    end
+
+    context "when a batch raises" do
+      let(:step_class) do
+        Class.new(Migrations::Conversion::Step) do
+          source do
+            def items
+              [
+                { body: "a" * 5_001, metadata: { source: "legacy" } },
+                "raw item",
+                3,
+                nil,
+                { id: 5, body: "ok" },
+                *(6..10).map { |id| { id:, body: "ok" } },
+              ]
+            end
+          end
+
+          processor do
+            batch_size 5
+
+            def process_batch(items)
+              raise "boom" if items.first.is_a?(Hash) && !items.first.key?(:id)
+
+              items.each do |item|
+                Migrations::Database::IntermediateDB.insert(
+                  "INSERT INTO notes (id, body) VALUES (?, ?)",
+                  item[:id],
+                  item[:body],
+                )
+              end
+            end
+          end
+        end
+      end
+
+      it "logs one error with useful batch details and carries on with the next slice" do
+        described_class.new(step: step_class.new, shard_path: @shard_path, channel:).run
+
+        expect(shard_rows("notes")).to eq((6..10).to_a)
+        expect(channel.errors).to eq(1)
+        # The failed slice still counts toward progress, like a failed item does.
+        expect(channel.progress).to eq(10)
+
+        entry = log_entries.first
+        expect(entry[:message]).to eq(I18n.t("converter.log.batch_failed"))
+        expect(JSON.parse(entry[:details])).to eq(
+          [
+            { "body" => "#{"a" * 4_997}...", "metadata" => { "source" => "legacy" } },
+            "raw item",
+            3,
+            nil,
+            { "id" => 5, "body" => "ok" },
+          ],
+        )
+      end
+    end
   end
 
   context "with a partitioned source" do
@@ -125,7 +302,7 @@ RSpec.describe Migrations::Conversion::StepRunner do
       described_class.new(
         step: partitioned_step_class.new,
         shard_path: @shard_path,
-        reporter:,
+        channel:,
         **read,
       ).run
     end

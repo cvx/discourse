@@ -1,10 +1,6 @@
 import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
-import {
-  isDestroyed,
-  isDestroying,
-  registerDestructor,
-} from "@ember/destroyable";
+import { isDestroying, registerDestructor } from "@ember/destroyable";
 import { array } from "@ember/helper";
 import { service } from "@ember/service";
 import { modifier as modifierFn } from "ember-modifier";
@@ -17,6 +13,7 @@ import SwipeEvents, {
   shouldCloseMenu,
 } from "discourse/lib/swipe-events";
 import TrackedMediaQuery from "discourse/lib/tracked-media-query";
+import { applyValueTransformer } from "discourse/lib/transformer";
 import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import dCloseOnClickOutside from "discourse/ui-kit/modifiers/d-close-on-click-outside";
 import JumpToPost from "./modal/jump-to-post";
@@ -96,6 +93,45 @@ export default class TopicNavigation extends Component {
     this.#heightQuery?.teardown();
   }
 
+  get renderTimeline() {
+    // Expanded == mobile fullscreen mode; always render.
+    if (this.info.topicProgressExpanded) {
+      return true;
+    }
+
+    return applyValueTransformer(
+      "topic-navigation-render-timeline",
+      this.#fitsTimeline,
+      { topic: this.args.topic }
+    );
+  }
+
+  get #fitsTimeline() {
+    if (this.site.mobileView || EmbedMode.enabled) {
+      return false;
+    }
+
+    if (!this.widthQuery.matches) {
+      return false;
+    }
+
+    // If composer is open, check we have enough vertical space.
+    if (this.composer.isPreviewActive) {
+      return this.heightQuery?.matches ?? false;
+    }
+
+    return true;
+  }
+
+  @cached
+  get heightQuery() {
+    const threshold = this.composer.isPreviewActive
+      ? MIN_HEIGHT_TIMELINE + this.composerHeight + headerOffset()
+      : null;
+
+    return this.#buildHeightQuery(threshold);
+  }
+
   setupAppEvents() {
     this.appEvents
       .on("topic:current-post-scrolled", this.topicScrolled)
@@ -118,46 +154,6 @@ export default class TopicNavigation extends Component {
     const query = new TrackedMediaQuery(`(min-width: ${MIN_WIDTH_TIMELINE}px)`);
     registerDestructor(this, () => query.teardown());
     return query;
-  }
-
-  get renderTimeline() {
-    // Expanded == mobile fullscreen mode; always render.
-    if (this.info.topicProgressExpanded) {
-      return true;
-    }
-
-    if (this.site.mobileView || EmbedMode.enabled) {
-      return false;
-    }
-
-    if (!this.widthQuery.matches) {
-      return false;
-    }
-
-    // If composer is open, check we have enough vertical space.
-    if (this.composer.isPreviewVisible) {
-      return this.heightQuery?.matches ?? false;
-    }
-
-    return true;
-  }
-
-  @cached
-  get heightQuery() {
-    const threshold = this.composer.isPreviewVisible
-      ? MIN_HEIGHT_TIMELINE + this.composerHeight + headerOffset()
-      : null;
-
-    return this.#buildHeightQuery(threshold);
-  }
-
-  #buildHeightQuery(threshold) {
-    this.#heightQuery?.teardown();
-    this.#heightQuery =
-      threshold === null
-        ? null
-        : new TrackedMediaQuery(`(min-height: ${threshold}px)`);
-    return this.#heightQuery;
   }
 
   @bind
@@ -194,7 +190,7 @@ export default class TopicNavigation extends Component {
       .forEach((el) => el.classList.remove("show"));
 
     discourseLater(() => {
-      if (isDestroying(this) || isDestroyed(this)) {
+      if (isDestroying(this)) {
         return;
       }
       this.info.topicProgressExpanded = false;
@@ -284,6 +280,15 @@ export default class TopicNavigation extends Component {
       [{ transform: `translate3d(0, ${this.pxClosed}px, 0)` }],
       { fill: "forwards" }
     );
+  }
+
+  #buildHeightQuery(threshold) {
+    this.#heightQuery?.teardown();
+    this.#heightQuery =
+      threshold === null
+        ? null
+        : new TrackedMediaQuery(`(min-height: ${threshold}px)`);
+    return this.#heightQuery;
   }
 
   <template>

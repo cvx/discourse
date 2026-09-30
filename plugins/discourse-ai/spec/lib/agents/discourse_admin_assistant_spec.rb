@@ -11,11 +11,13 @@ RSpec.describe DiscourseAi::Agents::DiscourseAdminAssistant do
   it "combines Discourse knowledge, general administration, and site-setting tools" do
     expect(assistant.tools).to eq(
       [
+        DiscourseAi::Agents::Tools::LoadDiscourseWebsitePage,
         DiscourseAi::Agents::Tools::DiscourseMetaSearch,
         DiscourseAi::Agents::Tools::ListCategories,
         DiscourseAi::Agents::Tools::ListTags,
         DiscourseAi::Agents::Tools::SettingContext,
         DiscourseAi::Agents::Tools::SearchSettings,
+        DiscourseAi::Agents::Tools::SearchDiscourseNavigation,
         DiscourseAi::Agents::Tools::ReadSiteSetting,
         DiscourseAi::Agents::Tools::ChangeSiteSetting,
         DiscourseAi::Agents::Tools::ListReviewables,
@@ -24,8 +26,12 @@ RSpec.describe DiscourseAi::Agents::DiscourseAdminAssistant do
         DiscourseAi::Agents::Tools::UnlistTopic,
         DiscourseAi::Agents::Tools::DeleteTopic,
         DiscourseAi::Agents::Tools::EditPost,
+        DiscourseAi::Agents::Tools::CreateCategory,
         DiscourseAi::Agents::Tools::EditCategory,
-        DiscourseAi::Agents::Tools::EditTags,
+        DiscourseAi::Agents::Tools::ChangeTopicCategory,
+        DiscourseAi::Agents::Tools::CreateTag,
+        DiscourseAi::Agents::Tools::EditTag,
+        DiscourseAi::Agents::Tools::ChangeTopicTags,
         DiscourseAi::Agents::Tools::MovePosts,
         DiscourseAi::Agents::Tools::SuspendUser,
         DiscourseAi::Agents::Tools::SilenceUser,
@@ -37,12 +43,38 @@ RSpec.describe DiscourseAi::Agents::DiscourseAdminAssistant do
   it "requires an administrator request and approval before changing settings" do
     expect(assistant.system_prompt).to include(
       "Only change site settings, categories, tags, reviewable content, topics, posts, or users when an administrator explicitly asks you to do so.",
+      "When an administrator explicitly requests a change and provides the required details, invoke the corresponding write tool before writing any response.",
+      "If required details are missing, ask for them.",
+      "Invoke a separate write tool call for every requested change, including repeated requests and multiple changes in the same message.",
+      "Previous tool calls never apply to later requests.",
+      "Only say that a change is pending approval when the write tool returned a pending approval result in the current turn.",
       "Every change requires human approval.",
     )
   end
 
   it "is registered as a system agent with a deterministic id" do
     expect(DiscourseAi::Agents::Agent.system_agents[described_class]).to eq(-39)
+  end
+
+  it "stops tool chains while an action is pending approval" do
+    expect(assistant.stop_chain_on_pending_approval?).to eq(true)
+  end
+
+  it "instructs the model to route requests to the appropriate source tool" do
+    prompt = assistant.craft_prompt(DiscourseAi::Agents::BotContext.new)
+
+    expect(prompt.system_message_text).to include(
+      "For questions about public Discourse hosting plans and pricing, call `load_discourse_website_page` with `page_name` set to `pricing`",
+      "For managing this site's hosting account, subscription, invoices, or billing, use `search_discourse_navigation`",
+      "Never invent a path",
+      "For general questions about Discourse, call `search_meta_discourse` twice before answering",
+      "For questions about this site's configuration or content, use the relevant site and administration tools",
+    )
+    expect(prompt.tools.map(&:name)).to include(
+      "load_discourse_website_page",
+      "search_meta_discourse",
+      "search_discourse_navigation",
+    )
   end
 
   it "is only available to administrators" do

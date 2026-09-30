@@ -34,9 +34,12 @@ require_relative "lib/discourse_topic_voting/topic_votes_filter"
 after_initialize do
   SeedFu.fixture_paths << Rails.root.join("plugins/discourse-topic-voting/db/fixtures").to_s
 
+  if respond_to?(:register_discourse_workflows_node)
+    register_discourse_workflows_node { DiscourseWorkflows::Nodes::TopicReceivedVote::V1 }
+  end
+
   reloadable_patch do
     register_category_type(DiscourseTopicVoting::Categories::Types::Ideas)
-    CategoriesController.prepend(DiscourseTopicVoting::CategoriesControllerExtension)
     Category.prepend(DiscourseTopicVoting::CategoryExtension)
     ListController.prepend(DiscourseTopicVoting::ListControllerExtension)
     Topic.prepend(DiscourseTopicVoting::TopicExtension)
@@ -227,18 +230,6 @@ after_initialize do
     DiscourseTopicVoting::UserMerger.merge(source_user, target_user)
   end
 
-  on(:upcoming_change_enabled) do |setting_name|
-    if setting_name == :enable_topic_voting_badges
-      DiscourseTopicVoting::EnableTopicVotingBadgesToggled.call(enabled: true)
-    end
-  end
-
-  on(:upcoming_change_disabled) do |setting_name|
-    if setting_name == :enable_topic_voting_badges
-      DiscourseTopicVoting::EnableTopicVotingBadgesToggled.call(enabled: false)
-    end
-  end
-
   Discourse::Application.routes.prepend do
     get "c/*category_slug_path_with_id/l/votes.rss" => "list#votes_feed", :format => :rss
   end
@@ -261,4 +252,36 @@ after_initialize do
       guardian: user.guardian,
     )
   end
+end
+
+after_initialize do
+  require_relative "lib/discourse_topic_voting/mcp_tools"
+  register_mcp_tool(
+    "discourse_topic_voting_vote_set",
+    title: "Set topic vote",
+    description: "Casts or removes the authenticated user's vote on a visible votable topic.",
+    implementation: DiscourseTopicVoting::McpTools::SetVote,
+    input_schema: {
+      type: "object",
+      properties: {
+        topic_id: {
+          type: "integer",
+          minimum: 1,
+        },
+        voted: {
+          type: "boolean",
+        },
+      },
+      required: %w[topic_id voted],
+      additionalProperties: false,
+    },
+    output_schema: DiscourseTopicVoting::McpTools::SetVote::OUTPUT_SCHEMA,
+    required_scopes: DiscourseTopicVoting::McpTools::SetVote::REQUIRED_SCOPES,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+    },
+    risk: :write,
+    availability: -> { SiteSetting.topic_voting_enabled },
+  )
 end

@@ -1,14 +1,15 @@
 import { tracked } from "@glimmer/tracking";
 import EmberObject, { computed, set } from "@ember/object";
 import { trustHTML } from "@ember/template";
-import BufferedProxy from "ember-buffered-proxy/proxy";
 import {
   DEFAULT_USER_PREFERENCES,
   SITE_SETTING_REQUIRES_CONFIRMATION_TYPES,
 } from "discourse/admin/lib/constants";
 import SettingObjectHelper from "discourse/admin/lib/setting-object-helper";
 import { ajax } from "discourse/lib/ajax";
+import BufferedProxy from "discourse/lib/buffered-proxy";
 import { bind } from "discourse/lib/decorators";
+import { applyValueTransformer } from "discourse/lib/transformer";
 import { i18n } from "discourse-i18n";
 
 /**
@@ -85,7 +86,9 @@ export default class SiteSetting extends EmberObject {
 
   constructor() {
     super(...arguments);
-    this.buffered = BufferedProxy.create({ content: this });
+    this.buffered = /** @type {BufferedProxy} */ (
+      BufferedProxy.create({ content: this })
+    );
   }
 
   @computed("settingObjectHelper.overridden")
@@ -126,7 +129,11 @@ export default class SiteSetting extends EmberObject {
 
   @computed("settingObjectHelper.allowsNone")
   get allowsNone() {
-    return this.settingObjectHelper?.allowsNone;
+    return applyValueTransformer(
+      "site-setting-allows-none",
+      this.settingObjectHelper?.allowsNone,
+      { siteSetting: this }
+    );
   }
 
   set allowsNone(value) {
@@ -154,13 +161,28 @@ export default class SiteSetting extends EmberObject {
     };
   }
 
+  get settingSubtype() {
+    if (this.list_type) {
+      return;
+    }
+
+    if (this.textarea) {
+      return "textarea";
+    }
+
+    if (this.secret) {
+      return "password";
+    }
+  }
+
   get definition() {
     return {
       key: this.setting,
-      label: this.humanized_name,
+      label: this.humanized_name || this.setting,
       description: trustHTML(this.description),
       type: this.type,
       list_type: this.list_type,
+      subtype: this.settingSubtype,
       min: this.min,
       max: this.max,
       choices: this.choices,
@@ -175,15 +197,6 @@ export default class SiteSetting extends EmberObject {
 
   get pendingValue() {
     return this.buffered.get("value");
-  }
-
-  commit() {
-    this.validationMessage = null;
-    this.buffered.applyChanges();
-  }
-
-  rollback() {
-    this.buffered.discardChanges();
   }
 
   get requiresConfirmation() {
@@ -209,6 +222,15 @@ export default class SiteSetting extends EmberObject {
 
   get affectsExistingUsers() {
     return DEFAULT_USER_PREFERENCES.includes(this.setting);
+  }
+
+  commit() {
+    this.validationMessage = null;
+    this.buffered.applyChanges();
+  }
+
+  rollback() {
+    this.buffered.discardChanges();
   }
 
   @bind

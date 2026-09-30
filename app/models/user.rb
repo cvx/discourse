@@ -24,6 +24,8 @@ class User < ActiveRecord::Base
   has_many :category_users, dependent: :destroy
   has_many :tag_users, dependent: :destroy
   has_many :user_api_keys, dependent: :destroy
+  has_many :mcp_oauth_authorizations, dependent: :destroy
+  has_many :mcp_oauth_access_tokens, dependent: :destroy
   has_many :topic_allowed_users, dependent: :destroy
   has_many :user_archived_messages, dependent: :destroy
   has_many :email_change_requests, dependent: :destroy
@@ -251,6 +253,7 @@ class User < ActiveRecord::Base
 
   # Skip validating email, for example from a particular auth provider plugin
   attr_accessor :skip_email_validation
+  attr_accessor :enforce_username_restrictions
 
   # Whether we need to be sending a system message after creation
   attr_accessor :send_welcome_message
@@ -281,6 +284,8 @@ class User < ActiveRecord::Base
             email,
           )
         end
+
+  scope :bot_users, -> { where("users.id <= 0") }
 
   scope :human_users,
         ->(allowed_bot_user_ids: nil) do
@@ -409,11 +414,8 @@ class User < ActiveRecord::Base
   def visible_sidebar_tags(user_guardian = nil)
     user_guardian ||= guardian
 
-    DiscourseTagging.filter_visible(
-      Tag.where(
-        id: SidebarSectionLink.where(user_id: id, linkable_type: "Tag").select(:linkable_id),
-      ),
-      user_guardian,
+    Tag.browsable(user_guardian).where(
+      id: sidebar_section_links.where(linkable_type: "Tag").select(:linkable_id),
     )
   end
 
@@ -1307,6 +1309,17 @@ class User < ActiveRecord::Base
     end
   end
 
+  def remove_avatar!(actor)
+    return if uploaded_avatar_id.blank?
+
+    self.class.transaction do
+      update!(uploaded_avatar_id: nil)
+      user_avatar&.update!(custom_upload_id: nil, gravatar_upload_id: nil)
+    end
+
+    StaffActionLogger.new(actor).log_removed_avatar(self)
+  end
+
   # The following count methods are somewhat slow - definitely don't use them in a loop.
   # They might need to be denormalized
   def like_count
@@ -1515,6 +1528,10 @@ class User < ActiveRecord::Base
     if reviewable = ReviewableUser.pending.find_by(target: self)
       reviewable.perform(performed_by, :delete_user)
     end
+  end
+
+  def revoke_approval!
+    update!(approved: false, approved_by: nil, approved_at: nil)
   end
 
   def change_trust_level!(level, opts = nil)
@@ -2142,6 +2159,14 @@ class User < ActiveRecord::Base
     username_format_validator ||
       begin
         if will_save_change_to_username?
+          if enforce_username_restrictions &&
+               (
+                 User.reserved_username?(username) ||
+                   UsernameValidator.clashing_with_existing_route?(username)
+               )
+            errors.add(:username, I18n.t("login.reserved_username"))
+          end
+
           existing =
             DB.query(USERNAME_EXISTS_SQL, username: self.class.normalize_username(username))
 
@@ -2352,7 +2377,7 @@ class User < ActiveRecord::Base
   end
 
   def trigger_user_updated_event
-    DiscourseEvent.trigger(:user_updated, self)
+    DiscourseEvent.trigger(:user_updated, self, %w[uploaded_avatar_id])
     true
   end
 

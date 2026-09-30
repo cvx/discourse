@@ -18,7 +18,6 @@ he:
       votes:
         one: "הצבעה"
         two: "שתי הצבעות"
-        many: "%{count} הצבעות"
         other: "%{count} הצבעות"
       remove_vote: "הסרת הצבעה"
       and_more_voters: "ו־%{count} נוספות..."
@@ -40,3 +39,6 @@ he:
           group_name: "אירוע הצבעה בנושא"
           topic_upvote: "כשמשתמש מצביע לנושא"
           topic_unvote: "כשמשתמש מבטל הצבעה לנושא"
+    discourse_workflows:
+      topic_received_vote:
+        tag_names: "תגיות"

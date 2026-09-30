@@ -1,5 +1,6 @@
 import { cancel } from "@ember/runloop";
 import Service, { service } from "@ember/service";
+import { isAutomationDetected } from "discourse/lib/automation-detection";
 import getURL from "discourse/lib/get-url";
 import discourseLater from "discourse/lib/later";
 import {
@@ -20,14 +21,17 @@ const EVENT_COUNTERS = {
 
 const MAX_HUMAN_STEP = 100;
 
-const FLUSH_DELAY_MS = 3 * 60 * 1000;
+const FLUSH_DELAY_MS = 10 * 60 * 1000;
 
 const THROTTLE_MS = 3000;
+const ENGAGEMENT_THRESHOLD_SECONDS = 10;
 
 export default class HumanActivityTracker extends Service {
   @service siteSettings;
 
   now = () => performance.now();
+
+  trustedEvent = (event) => event.isTrusted;
 
   transport = (body) => {
     navigator.sendBeacon?.(
@@ -46,6 +50,8 @@ export default class HumanActivityTracker extends Service {
   #engagedMs = 0;
   #engagedSince = null;
   #lastSentMs = null;
+  #sentEngagementThreshold = false;
+  #sentEventCategories = new Set();
   #counts;
   #activityListener;
   #mouseMoveListener;
@@ -58,6 +64,10 @@ export default class HumanActivityTracker extends Service {
   }
 
   start() {
+    if (isAutomationDetected()) {
+      return;
+    }
+
     this.#sessionId = document.querySelector(
       "meta[name=discourse-track-view-session-id]"
     )?.content;
@@ -79,7 +89,7 @@ export default class HumanActivityTracker extends Service {
     this.#mouseMoveListener = (event) => this.#handleMouseMove(event);
     this.#attentionListener = (attention) =>
       this.#handleAttentionChange(attention);
-    this.#pagehideListener = () => this.#flush({ force: true });
+    this.#pagehideListener = () => this.#flush({ final: true });
 
     Object.keys(EVENT_COUNTERS).forEach((eventName) => {
       window.addEventListener(eventName, this.#activityListener, {
@@ -94,13 +104,6 @@ export default class HumanActivityTracker extends Service {
 
     this.#handleAttentionChange(browserAttention());
     this.#scheduleNextFlush();
-  }
-
-  #scheduleNextFlush() {
-    this.#flushTimer = this.scheduleFlush(() => {
-      this.#flush();
-      this.#scheduleNextFlush();
-    });
   }
 
   stop() {
@@ -129,12 +132,27 @@ export default class HumanActivityTracker extends Service {
     }
   }
 
+  #scheduleNextFlush() {
+    this.#flushTimer = this.scheduleFlush(() => {
+      this.#flush();
+      this.#scheduleNextFlush();
+    });
+  }
+
   #handleActivity(event) {
+    if (!this.trustedEvent(event)) {
+      return;
+    }
+
     this.#counts[EVENT_COUNTERS[event.type]]++;
     this.#markInteraction();
   }
 
   #handleMouseMove(event) {
+    if (!this.trustedEvent(event)) {
+      return;
+    }
+
     const position = { x: event.clientX, y: event.clientY };
 
     if (this.#lastPosition) {
@@ -189,26 +207,47 @@ export default class HumanActivityTracker extends Service {
     };
   }
 
-  #flush({ force = false } = {}) {
-    if (force && this.#flushTimer) {
+  #eventCategories() {
+    return Object.entries(this.#counts)
+      .filter(([, count]) => count > 0)
+      .map(([category]) => category);
+  }
+
+  #flush({ final = false } = {}) {
+    if (final && this.#flushTimer) {
       cancel(this.#flushTimer);
       this.#flushTimer = null;
     }
+    const eventCategories = this.#eventCategories();
+    if (eventCategories.length < 2) {
+      return;
+    }
 
-    const total = Object.values(this.#counts).reduce((sum, n) => sum + n, 0);
-    if (total === 0) {
+    const hasNewEventCategory = eventCategories.some(
+      (category) => !this.#sentEventCategories.has(category)
+    );
+    const reachedEngagementThresholdForFirstTime =
+      !this.#sentEngagementThreshold &&
+      this.#engagedSeconds() >= ENGAGEMENT_THRESHOLD_SECONDS;
+    if (
+      !final &&
+      !hasNewEventCategory &&
+      !reachedEngagementThresholdForFirstTime
+    ) {
       return;
     }
 
     const now = this.now();
     if (
-      !force &&
+      !final &&
       this.#lastSentMs !== null &&
       now - this.#lastSentMs < THROTTLE_MS
     ) {
       return;
     }
     this.#lastSentMs = now;
+    this.#sentEngagementThreshold ||= reachedEngagementThresholdForFirstTime;
+    this.#sentEventCategories = new Set(eventCategories);
 
     this.transport(this.#buildPayload());
   }

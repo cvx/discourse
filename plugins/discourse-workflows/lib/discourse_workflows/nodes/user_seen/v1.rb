@@ -14,7 +14,7 @@ module DiscourseWorkflows
             color: "green",
           },
           group: "discourse_triggers",
-          events: [:user_seen],
+          event: :user_seen,
           output_contracts: [{ schema: Schema::USER_SEEN_SCHEMA }],
           properties: {
             trigger_conditions: {
@@ -130,18 +130,7 @@ module DiscourseWorkflows
         end
 
         def matches_groups?(group_ids)
-          raw_group_ids = Array.wrap(group_ids).reject(&:blank?)
-          return true if raw_group_ids.empty?
-
-          group_ids = normalize_group_ids(raw_group_ids)
-          group_ids.present? && !!@user&.in_any_groups?(group_ids)
-        end
-
-        def normalize_group_ids(group_ids)
-          group_ids.filter_map do |group_id|
-            value = group_id.to_s
-            value.to_i if value.match?(/\A\d+\z/)
-          end
+          matches_user_groups?(@user, group_ids)
         end
 
         def first_seen?

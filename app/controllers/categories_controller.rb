@@ -36,6 +36,8 @@ class CategoriesController < ApplicationController
   MIN_CATEGORIES_TOPICS = 5
   MAX_CATEGORIES_TOPICS = 100
   MAX_CATEGORIES_LIMIT = 25
+  MAX_CATEGORY_SEARCH_TERM_LENGTH = 250
+  MAX_CATEGORY_SEARCH_WORDS = 25
 
   def redirect
     return if handle_permalink("/category/#{params[:path]}")
@@ -63,19 +65,20 @@ class CategoriesController < ApplicationController
           MultiJson.dump(CategoryListSerializer.new(@category_list, scope: guardian)),
         )
 
-        @topic_list = fetch_topic_list
-
-        if @topic_list.present? && @topic_list.topics.present?
-          store_preloaded(
-            @topic_list.preload_key,
-            MultiJson.dump(TopicListSerializer.new(@topic_list, scope: guardian)),
-          )
-        end
+        preload_topic_list
 
         render
       end
 
       format.json { render_serialized(@category_list, CategoryListSerializer) }
+      format.md do
+        render_markdown(
+          MarkdownEndpoint::DirectoryRenderer.new.categories(
+            @category_list,
+            params.permit(:page, :parent_category_id, :include_subcategories, :tag).to_h,
+          ),
+        )
+      end
     end
   end
 
@@ -137,6 +140,9 @@ class CategoriesController < ApplicationController
           Categories::TypeRegistry.counts
         end
 
+    # NOTE: Keep in mind types may not be visible if their visible? method relies
+    # on an upcoming change, and that upcoming change's plugin is not configurable,
+    # as is the case with some discourse hosted sites.
     render json: {
              types: Categories::TypeRegistry.list(only_visible: true, guardian:),
              counts: counts_by_type,
@@ -290,10 +296,6 @@ class CategoriesController < ApplicationController
 
       merge_pending_custom_fields!(cat, pending_custom_fields)
 
-      # properly null the value so the database constraint doesn't catch us
-      category_params[:email_in] = nil if category_params[:email_in]&.blank?
-      category_params[:minimum_required_tags] = 0 if category_params[:minimum_required_tags]&.blank?
-
       old_permissions = cat.permissions_params
       old_permissions = { Group[:everyone].name => 1 } if old_permissions.empty?
 
@@ -309,8 +311,6 @@ class CategoriesController < ApplicationController
           )
         end
       end
-
-      DiscourseEvent.trigger(:category_updated, cat) if result
 
       result
     end
@@ -448,6 +448,10 @@ class CategoriesController < ApplicationController
 
     Category.preload_user_fields!(guardian, categories)
 
+    if serializer == SiteCategorySerializer && Site.preloaded_category_custom_fields.present?
+      Category.preload_custom_fields(categories, Site.preloaded_category_custom_fields)
+    end
+
     render_serialized(categories, serializer, root: :categories, scope: guardian)
   end
 
@@ -466,7 +470,7 @@ class CategoriesController < ApplicationController
   end
 
   def search
-    term = params[:term].to_s.strip
+    term = params[:term].to_s.strip[0, MAX_CATEGORY_SEARCH_TERM_LENGTH]
     parent_category_id = params[:parent_category_id].to_i if params[:parent_category_id].present?
     include_uncategorized =
       (
@@ -509,7 +513,13 @@ class CategoriesController < ApplicationController
 
     categories = Category.secured(guardian)
 
-    if term.present? && words = term.split
+    if term.present?
+      words = []
+      term.scan(/\S+/) do |word|
+        words << word
+        break if words.size >= MAX_CATEGORY_SEARCH_WORDS
+      end
+
       words.each do |word|
         categories =
           categories.where(
@@ -546,8 +556,6 @@ class CategoriesController < ApplicationController
           :uploaded_logo_dark,
           :uploaded_background,
           :uploaded_background_dark,
-          :tags,
-          :tag_groups,
           :form_templates,
           category_required_tag_groups: :tag_group,
         )
@@ -870,11 +878,26 @@ class CategoriesController < ApplicationController
       parent_category_id: parent_category&.id,
       include_topics: include_topics,
       include_subcategories: include_subcategories,
+      include_pagination: request.format.md?,
       tag: params[:tag],
       page: params[:page].try(:to_i) || 1,
     }
 
     @category_list = CategoryList.new(guardian, category_options)
+  end
+
+  # The crawler layout renders categories only and emits no preloaded data, so
+  # building and serializing the list would be pure waste.
+  def preload_topic_list
+    return if use_crawler_layout?
+
+    @topic_list = fetch_topic_list
+    return if @topic_list.blank? || @topic_list.topics.blank?
+
+    store_preloaded(
+      @topic_list.preload_key,
+      MultiJson.dump(TopicListSerializer.new(@topic_list, scope: guardian)),
+    )
   end
 
   def fetch_topic_list(topics_filter: nil)

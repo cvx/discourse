@@ -16,13 +16,18 @@ export default class SettingDefinitionField extends Component {
   }
 
   get description() {
-    return this.entry.includeDescription === false
-      ? undefined
-      : this.args.definition.description;
+    if (
+      this.args.showDescription === false ||
+      this.entry.includeDescription === false
+    ) {
+      return undefined;
+    }
+
+    return this.args.definition.description;
   }
 
   get format() {
-    return this.args.definition.format ?? this.entry.format;
+    return this.args.format ?? this.args.definition.format ?? this.entry.format;
   }
 
   get validation() {
@@ -31,18 +36,21 @@ export default class SettingDefinitionField extends Component {
 
   <template>
     <@form.Field
-      @name={{@definition.key}}
-      @title={{@definition.label}}
       @description={{this.description}}
-      @placeholder={{@definition.placeholder}}
-      @validation={{this.validation}}
-      @type={{this.entry.type}}
+      @disabled={{@disabled}}
       @format={{this.format}}
       @labelFormat={{this.entry.labelFormat}}
+      @name={{@definition.key}}
+      @placeholder={{@definition.placeholder}}
+      @showControlTitle={{@showControlTitle}}
+      @showTitle={{@showTitle}}
+      @title={{@definition.label}}
+      @type={{this.entry.type}}
+      @validation={{this.validation}}
       as |field|
     >
       {{#if this.renderer}}
-        <this.renderer @field={{field}} @definition={{@definition}} />
+        <this.renderer @definition={{@definition}} @field={{field}} />
       {{else}}
         <field.Control placeholder={{field.placeholder}} />
       {{/if}}

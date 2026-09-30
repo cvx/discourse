@@ -11,6 +11,9 @@ class SiteSerializer < ApplicationSerializer
     :trust_levels,
     :groups,
     :filters,
+    :anonymous_list_filters,
+    :homepage_choices,
+    :homepage_options,
     :periods,
     :top_menu_items,
     :anonymous_top_menu_items,
@@ -19,6 +22,7 @@ class SiteSerializer < ApplicationSerializer
     :post_action_types,
     :topic_flag_types,
     :can_create_tag,
+    :can_search,
     :can_tag_topics,
     :can_tag_pms,
     :tags_filter_regexp,
@@ -223,6 +227,18 @@ class SiteSerializer < ApplicationSerializer
     Discourse.filters.map(&:to_s)
   end
 
+  def anonymous_list_filters
+    Discourse.anonymous_list_filters.map(&:to_s)
+  end
+
+  def homepage_choices
+    HomepageSiteSetting.choices
+  end
+
+  def homepage_options
+    DiscoursePluginRegistry.homepage_options.map { |option| option.slice(:id, :path, :server_side) }
+  end
+
   def periods
     TopTopic.periods.map(&:to_s)
   end
@@ -245,6 +261,10 @@ class SiteSerializer < ApplicationSerializer
 
   def can_create_tag
     scope.can_create_tag?
+  end
+
+  def can_search
+    scope.can_search?
   end
 
   def can_tag_topics
@@ -361,11 +381,10 @@ class SiteSerializer < ApplicationSerializer
   def anonymous_default_navigation_menu_tags
     @anonymous_default_navigation_menu_tags ||=
       begin
-        tag_names =
-          SiteSetting.default_navigation_menu_tags.split("|") -
-            DiscourseTagging.hidden_tag_names(scope)
+        tags = Tag.where(name: SiteSetting.default_navigation_menu_tags.split("|"))
+        tags = DiscourseTagging.filter_visible(tags, scope)
 
-        serialize_tags(Tag.where(name: tag_names).order(:name))
+        serialize_tags(tags.order(:name))
       end
   end
 

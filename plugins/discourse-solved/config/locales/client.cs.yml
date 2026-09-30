@@ -17,8 +17,6 @@ cs:
               label: "Přijatá řešení"
         sections:
           support:
-            filter:
-              all_categories: "Všechny kategorie"
             answerers:
               staff: "Redakce"
               member: "Členové"
@@ -28,6 +26,10 @@ cs:
                 lt_1h: "< 1 hodina"
                 gt_24h: "> 24 hodin"
   js:
+    discourse_workflows:
+      solution_changed:
+        changes_removed: "Odstraněno"
+        tag_names: "Tagy"
     notifications:
       alt:
         solved:
@@ -91,6 +93,11 @@ cs:
           solved: "jsou vyřešeny"
           unsolved: "nejsou vyřešeny"
     admin:
+      reports:
+        related_items:
+          labels:
+            topic: "Témata"
+            category: "Kategorie"
       web_hooks:
         solved_event:
           group_name: "Vyřešená událost"

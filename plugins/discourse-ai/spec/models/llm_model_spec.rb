@@ -8,7 +8,7 @@ RSpec.describe LlmModel do
 
     before { ENV["DISCOURSE_AI_SEEDED_LLM_API_KEY_2"] = "blabla" }
 
-    it "should use environment variable over database value if seeded LLM" do
+    it "uses the environment variable instead of the database value for a seeded LLM" do
       expect(llm_model.api_key).to eq("blabla")
     end
   end
@@ -145,6 +145,61 @@ RSpec.describe LlmModel do
           cache_write_tokens: 1_000,
         ),
       ).to be_nil
+    end
+  end
+
+  describe "vision delegation" do
+    fab!(:native_model) do
+      Fabricate(:llm_model, display_name: "Native vision", vision_enabled: true)
+    end
+
+    it "represents disabled, native, and delegated modes without changing native capability" do
+      disabled_model = Fabricate(:llm_model)
+      delegated_model = Fabricate(:llm_model, vision_llm_model: native_model)
+
+      expect(disabled_model.vision_mode).to eq("disabled")
+      expect(native_model.vision_mode).to eq("native")
+      expect(delegated_model.vision_mode).to eq("delegated")
+      expect(delegated_model).to be_delegated_vision
+      expect(delegated_model).not_to be_vision_enabled
+    end
+
+    it "rejects native delegation, self-reference, and non-native targets" do
+      disabled_target = Fabricate(:llm_model, display_name: "Disabled target")
+      model = Fabricate.build(:llm_model, vision_enabled: true, vision_llm_model: native_model)
+      expect(model).not_to be_valid
+
+      model = Fabricate(:llm_model)
+      model.vision_llm_model = model
+      expect(model).not_to be_valid
+
+      model.vision_llm_model = disabled_target
+      expect(model).not_to be_valid
+    end
+
+    it "rejects delegation chains" do
+      delegate = Fabricate(:llm_model, vision_llm_model: native_model)
+      model = Fabricate.build(:llm_model, vision_llm_model: delegate)
+
+      expect(model).not_to be_valid
+    end
+
+    it "reports configured delegation but fails closed for a missing target" do
+      model = Fabricate(:llm_model, vision_llm_model: native_model)
+      model.update_column(:vision_llm_model_id, 99_999_999)
+      model.reload
+
+      expect(model.vision_mode).to eq("delegated")
+      expect(model).not_to be_delegated_vision
+    end
+
+    it "protects a vision target from deletion and demotion" do
+      dependent = Fabricate(:llm_model, display_name: "Text model", vision_llm_model: native_model)
+
+      expect(native_model.destroy).to eq(false)
+      expect(native_model.errors.full_messages.join).to include(dependent.display_name)
+      expect(native_model.update(vision_enabled: false)).to eq(false)
+      expect(native_model.errors.full_messages.join).to include(dependent.display_name)
     end
   end
 

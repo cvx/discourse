@@ -94,7 +94,7 @@ class PostRevisor
   ]
 
   # Extensions can inspect revision options via the `:post_edited` event payload.
-  attr_reader :category_changed, :post_revision, :opts
+  attr_reader :category_changed, :post_revision, :opts, :editor
 
   def initialize(post, topic = post.topic)
     @post = post
@@ -107,6 +107,10 @@ class PostRevisor
   def self.tracked_topic_fields
     @@tracked_topic_fields ||= {}
     @@tracked_topic_fields
+  end
+
+  def self.valid_post_type?(post_type)
+    [Post.types[:regular], Post.types[:moderator_action], Post.types[:whisper]].include?(post_type)
   end
 
   def self.track_topic_field(field, &block)
@@ -180,12 +184,12 @@ class PostRevisor
   track_topic_field(:tags) { |tc, tags| tc.apply_tag_changes(tags) }
 
   track_topic_field(:featured_link) do |topic_changes, featured_link|
-    if !SiteSetting.topic_featured_link_enabled ||
-         !topic_changes.guardian.can_edit_featured_link?(topic_changes.topic.category_id)
+    if featured_link.blank?
+      track_and_revise topic_changes, :featured_link, nil
+    elsif !topic_changes.guardian.can_edit_featured_link?(topic_changes.topic.category_id)
       topic_changes.check_result(false)
     else
-      topic_changes.record_change("featured_link", topic_changes.topic.featured_link, featured_link)
-      topic_changes.topic.featured_link = featured_link
+      track_and_revise topic_changes, :featured_link, featured_link
     end
   end
 
@@ -240,7 +244,10 @@ class PostRevisor
   end
 
   def self.tag_list_to_raw(tag_list)
-    tag_list.sort.map { |tag_name| "##{tag_name}" }.join(", ")
+    HashtagAutocompleteService
+      .new(Discourse.system_user.guardian)
+      .hashtags_for("tag", tag_list.sort)
+      .join(", ")
   end
 
   def self.tag_change_noop?(topic, incoming)
@@ -276,6 +283,8 @@ class PostRevisor
   # @option opts [Boolean] :skip_staff_log Skip creating an entry in the staff action log
   # @option opts [Boolean] :silent Don't send notifications to user
   # @option opts [Boolean] :hidden Force the created revision to be hidden from non-staff users
+  # @option opts [String] :expected_raw Reject the revision if the post changed before persistence
+  # @option opts [String] :preserve_cooked_token Identifies a client that already rendered the change
   # @return [Boolean] Returns true if the revision was successful, false otherwise
   def revise!(editor, fields, opts = {})
     @editor = editor
@@ -288,6 +297,10 @@ class PostRevisor
     @fields[:raw] = cleanup_whitespaces(@fields[:raw]) if @fields.has_key?(:raw)
     @fields[:user_id] = @fields[:user_id].to_i if @fields.has_key?(:user_id)
     @fields[:category_id] = @fields[:category_id].to_i if @fields.has_key?(:category_id)
+    if @fields.has_key?(:post_type)
+      @fields[:post_type] = @fields[:post_type].to_i
+      return false unless validate_post_type
+    end
     if @fields.has_key?(:tags) && PostRevisor.tag_change_noop?(@topic, @fields[:tags])
       @fields.delete(:tags)
     end
@@ -353,6 +366,15 @@ class PostRevisor
     @should_bump_topic = false
 
     Post.transaction do
+      if (expected_raw = @opts[:expected_raw])
+        locked_raw = Post.where(id: @post.id).lock("FOR UPDATE").pick(:raw)
+        if locked_raw != expected_raw
+          @post.errors.add(:base, :edit_conflict, message: I18n.t("edit_conflict"))
+          @post_successfully_saved = false
+          raise ActiveRecord::Rollback
+        end
+      end
+
       revise_post
 
       yield if block_given?
@@ -869,6 +891,10 @@ class PostRevisor
 
     DiscourseEvent.trigger(:before_post_publish_changes, post_changes, @topic_changes, options)
 
+    if (token = @opts[:preserve_cooked_token])
+      options[:preserve_cooked_token] = token
+    end
+
     @post.publish_change_to_clients!(:revised, options)
   end
 
@@ -908,6 +934,13 @@ class PostRevisor
   end
 
   private
+
+  def validate_post_type
+    return true if self.class.valid_post_type?(@fields[:post_type])
+
+    @post.errors.add(:post_type, :invalid)
+    false
+  end
 
   def resolve_reply_to_change
     new_post_number = @fields[:reply_to_post_number]

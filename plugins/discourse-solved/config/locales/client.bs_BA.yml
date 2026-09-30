@@ -10,13 +10,14 @@ bs_BA:
       dashboard:
         sections:
           support:
-            filter:
-              all_categories: "Sve kategorije"
             answerers:
               staff: "Staff"
               member: "Članovi"
               basic: "Osnovni"
   js:
+    discourse_workflows:
+      solution_changed:
+        tag_names: "Oznake"
     notifications:
       alt:
         solved:
@@ -47,6 +48,12 @@ bs_BA:
     topic_statuses:
       solved:
         help: "Ova tema ima riješenje"
+    admin:
+      reports:
+        related_items:
+          labels:
+            topic: "Topic"
+            category: "Kategorija"
     discourse_automation:
       triggerables:
         first_accepted_solution:

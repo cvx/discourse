@@ -2,15 +2,17 @@
 
 class BrowserPageviewSessionEngagementDailyRollup < ActiveRecord::Base
   BOUNCE_ENGAGED_SECONDS_THRESHOLD = 10
-  MIN_SESSION_AGE = 10.minutes
-  private_constant :BOUNCE_ENGAGED_SECONDS_THRESHOLD, :MIN_SESSION_AGE
+  private_constant :BOUNCE_ENGAGED_SECONDS_THRESHOLD
 
-  def self.aggregate(start_date:, end_date:, source: BrowserPageviewEvent.rollup_source)
+  def self.bounce_engaged_seconds_threshold
+    BOUNCE_ENGAGED_SECONDS_THRESHOLD
+  end
+
+  def self.aggregate(start_date:, end_date:)
     start_date = start_date.to_date
     end_date = end_date.to_date + 1
-
     transaction do
-      DB.exec(<<~SQL, start_date:, end_date:, source:)
+      DB.exec(<<~SQL, start_date:, end_date:)
         DELETE FROM browser_pageview_session_engagement_daily_rollups rollup
         WHERE rollup.date >= :start_date
           AND rollup.date < :end_date
@@ -19,7 +21,6 @@ class BrowserPageviewSessionEngagementDailyRollup < ActiveRecord::Base
             FROM browser_pageview_events
             WHERE created_at >= rollup.date
               AND created_at < rollup.date + 1
-              AND source = :source
           )
       SQL
 
@@ -30,22 +31,28 @@ class BrowserPageviewSessionEngagementDailyRollup < ActiveRecord::Base
           FROM browser_pageview_events
           WHERE created_at >= :start_date
             AND created_at < LEAST(:end_date::timestamp, :session_started_before::timestamp)
-            AND source = :source
         ),
         session_pageviews AS (
-          SELECT
-            bpe.session_id,
-            MIN(bpe.created_at)::date AS date,
-            COUNT(*) AS pageview_count,
-            bool_or(bpe.user_id IS NOT NULL) AS logged_in
-          FROM browser_pageview_events bpe
-          JOIN active_sessions ON active_sessions.session_id = bpe.session_id
-          WHERE bpe.source = :source
-          GROUP BY bpe.session_id
-          HAVING MIN(bpe.created_at) >= :start_date
+          SELECT sp.*
+          FROM active_sessions
+          CROSS JOIN LATERAL (
+            SELECT
+              bpe.session_id,
+              MIN(bpe.created_at)::date AS date,
+              COUNT(*) AS pageview_count,
+              bool_or(bpe.user_id IS NOT NULL) AS logged_in,
+              bool_or(#{CrawlerScorer.likely_crawler_condition(table: "bpe")}) AS likely_crawler
+            FROM browser_pageview_events bpe
+            WHERE bpe.session_id = active_sessions.session_id
+            GROUP BY bpe.session_id
+            HAVING MIN(bpe.created_at) >= :start_date
+          ) sp
         )
         INSERT INTO browser_pageview_session_engagement_daily_rollups
-          (date, logged_in, sessions, bounced, engaged_seconds_total)
+          (
+            date, logged_in, sessions, bounced, engaged_seconds_total,
+            likely_crawler_sessions, likely_crawler_bounced, likely_crawler_engaged_seconds_total
+          )
         SELECT
           session_pageviews.date,
           session_pageviews.logged_in,
@@ -54,7 +61,17 @@ class BrowserPageviewSessionEngagementDailyRollup < ActiveRecord::Base
             WHERE session_pageviews.pageview_count = 1
               AND COALESCE(engagement.engaged_seconds, 0) < :bounce_threshold
           ) AS bounced,
-          COALESCE(SUM(engagement.engaged_seconds), 0) AS engaged_seconds_total
+          COALESCE(SUM(engagement.engaged_seconds), 0) AS engaged_seconds_total,
+          COUNT(*) FILTER (WHERE session_pageviews.likely_crawler) AS likely_crawler_sessions,
+          COUNT(*) FILTER (
+            WHERE session_pageviews.likely_crawler
+              AND session_pageviews.pageview_count = 1
+              AND COALESCE(engagement.engaged_seconds, 0) < :bounce_threshold
+          ) AS likely_crawler_bounced,
+          COALESCE(
+            SUM(engagement.engaged_seconds) FILTER (WHERE session_pageviews.likely_crawler),
+            0
+          ) AS likely_crawler_engaged_seconds_total
         FROM session_pageviews
         LEFT JOIN browser_pageview_session_engagements engagement
           ON engagement.session_id = session_pageviews.session_id
@@ -62,9 +79,8 @@ class BrowserPageviewSessionEngagementDailyRollup < ActiveRecord::Base
       SQL
         start_date:,
         end_date:,
-        session_started_before: MIN_SESSION_AGE.ago,
+        session_started_before: BrowserPageviewSessionEngagement::BEACON_SETTLE_PERIOD.ago,
         bounce_threshold: BOUNCE_ENGAGED_SECONDS_THRESHOLD,
-        source:,
       )
     end
   end
@@ -74,12 +90,15 @@ end
 #
 # Table name: browser_pageview_session_engagement_daily_rollups
 #
-#  id                    :bigint           not null, primary key
-#  bounced               :bigint           not null
-#  date                  :date             not null
-#  engaged_seconds_total :bigint           not null
-#  logged_in             :boolean          not null
-#  sessions              :bigint           not null
+#  id                                   :bigint           not null, primary key
+#  bounced                              :bigint           not null
+#  date                                 :date             not null
+#  engaged_seconds_total                :bigint           not null
+#  likely_crawler_bounced               :bigint           default(0), not null
+#  likely_crawler_engaged_seconds_total :bigint           default(0), not null
+#  likely_crawler_sessions              :bigint           default(0), not null
+#  logged_in                            :boolean          not null
+#  sessions                             :bigint           not null
 #
 # Indexes
 #

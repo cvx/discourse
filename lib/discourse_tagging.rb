@@ -259,14 +259,16 @@ module DiscourseTagging
           end
           return false
         end
-
-        topic.tags = tags
       else
         return false unless validate_min_required_tags_for_category(guardian, topic, category)
         return false unless validate_required_tags_from_group(guardian, topic, category)
 
-        topic.tags = []
+        tags = []
       end
+
+      yield(tags) if block_given?
+
+      topic.tags = tags
       topic.tags_changed = true
 
       DiscourseEvent.trigger(
@@ -746,12 +748,30 @@ module DiscourseTagging
     filter_visible_in_accessible_categories(permitted, guardian)
   end
 
+  def self.visible_tag_ids_resolving_synonyms(tag_names, guardian = nil)
+    tag_ids =
+      filter_visible(Tag, guardian)
+        .where_name(tag_names)
+        .pluck(:id, :target_tag_id)
+        .map { |id, target_tag_id| target_tag_id || id }
+        .uniq
+
+    filter_visible(Tag.where(id: tag_ids), guardian).pluck(:id)
+  end
+
   def self.filter_visible(query, guardian = nil)
     guardian&.is_admin? ? query : query.where(id: visible_tags(guardian).select(:id))
   end
 
+  def self.visible_tag_ids(tags, guardian = nil)
+    ids = tags.map(&:id).uniq
+    return ids.to_set if ids.empty? || guardian&.is_admin?
+    visible_tags(guardian).where(id: ids).pluck(:id).to_set
+  end
+
   def self.filter_visible_in_accessible_categories(query, guardian = nil)
-    return query if guardian.nil? || guardian.is_admin?
+    guardian ||= Guardian.new
+    return query if guardian.is_admin?
 
     query.where(<<~SQL, ids: guardian.allowed_category_ids)
       tags.id NOT IN (
@@ -770,6 +790,13 @@ module DiscourseTagging
           ON ctg.tag_group_id = tgm.tag_group_id AND ctg.category_id IN (:ids)
       )
     SQL
+  end
+
+  def self.without_pm_only_tags(tags, guardian)
+    return tags if guardian.can_tag_pms?
+
+    topic_count_column = Tag.topic_count_column(guardian)
+    tags.reject { |tag| tag.pm_topic_count > 0 && tag.public_send(topic_count_column) == 0 }
   end
 
   def self.hidden_tags(guardian = nil)
@@ -929,6 +956,10 @@ module DiscourseTagging
         .all
       new_tag_names.each { |name| taggable.tags << Tag.create(name: name) }
     end
+  end
+
+  def self.editable_synonym_ids(synonyms, guardian)
+    synonyms.filter_map { |synonym| synonym.id if guardian.can_edit_tag?(synonym) }
   end
 
   # Add synonyms to a target tag.

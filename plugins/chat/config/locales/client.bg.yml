@@ -44,6 +44,8 @@ bg:
       cancel: "Прекрати"
       cancel_reply: "Отмяна на отговора"
       chat_channels: "Канали"
+      pinned_bar:
+        title: "Закована"
       pinned: "Закована"
       browse_all_channels: "Преглед на всички канали"
       move_to_channel:
@@ -159,6 +161,10 @@ bg:
           latest: "Последни"
       channel_list:
         title: "Канали"
+        options:
+          filter: "Филтър"
+        filter:
+          mentions: "Споменавания"
       incoming_webhooks:
         back: "Назад"
         description: "Описание"
@@ -234,3 +240,7 @@ bg:
         message: "Съобщение"
       chat_approval:
         message: "Съобщение"
+        value: "Стойност"
+        style_default: "По подразбиране"
+        style_primary: "Основен"
+        icon: "Икона"

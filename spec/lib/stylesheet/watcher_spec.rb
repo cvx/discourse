@@ -20,9 +20,9 @@ RSpec.describe Stylesheet::Watcher do
     end
 
     it "infers core targets from top-level stylesheet filenames" do
-      path = Rails.root.join("app/assets/stylesheets/mobile.scss")
+      path = Rails.root.join("app/assets/stylesheets/wizard.scss")
 
-      expect(watcher.path_data(path.to_s, [])).to include(target: "mobile", plugin_name: nil)
+      expect(watcher.path_data(path.to_s, [])).to include(target: "wizard", plugin_name: nil)
     end
 
     it "infers special core targets from top-level filenames" do
@@ -35,12 +35,12 @@ RSpec.describe Stylesheet::Watcher do
     end
 
     it "infers plugin names from stylesheet paths under plugins" do
-      plugin_path = Rails.root.join("plugins/discourse-calendar").to_s
-      path = Rails.root.join("plugins/discourse-calendar/assets/stylesheets/admin/calendar.scss")
+      plugin_path = Rails.root.join("plugins/discourse-events").to_s
+      path = Rails.root.join("plugins/discourse-events/assets/stylesheets/admin/calendar.scss")
 
       expect(watcher.path_data(path.to_s, [plugin_path])).to include(
         target: nil,
-        plugin_name: "discourse-calendar",
+        plugin_name: "discourse-events",
       )
     end
   end

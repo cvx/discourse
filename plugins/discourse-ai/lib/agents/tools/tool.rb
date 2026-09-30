@@ -47,6 +47,10 @@ module DiscourseAi
             false
           end
 
+          def mandatory_approval?
+            false
+          end
+
           # When true, the replayed tool (after approval) is given the
           # approving moderator as context.user, so guardian checks and
           # downstream audit logs (StaffActionLogger, UserHistory) credit
@@ -130,6 +134,14 @@ module DiscourseAi
             end
           end
           result
+        end
+
+        def max_invocations
+          options[:max_invocations].to_i
+        end
+
+        def invocation_limited?
+          max_invocations.positive?
         end
 
         def chain_next_response?

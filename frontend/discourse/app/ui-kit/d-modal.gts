@@ -11,7 +11,11 @@ import { modifier as modifierFn } from "ember-modifier";
 import htmlClass from "discourse/helpers/html-class";
 import { waitForAnimationEnd } from "discourse/lib/animation-utils";
 import { lock, unlock } from "discourse/lib/body-scroll-lock";
-import { getMaxAnimationTimeMs } from "discourse/lib/swipe-events";
+import {
+  dampenedOverdrag,
+  getMaxAnimationTimeMs,
+  shouldDeferSwipeToContent,
+} from "discourse/lib/swipe-events";
 import type Site from "discourse/models/site";
 import type AppEventsService from "discourse/services/app-events";
 import type { CapabilitiesService } from "discourse/services/capabilities";
@@ -33,14 +37,44 @@ export const CLOSE_INITIATED_BY_CLICK_OUTSIDE = "initiatedByClickOut";
 export const CLOSE_INITIATED_BY_MODAL_SHOW = "initiatedByModalShow";
 export const CLOSE_INITIATED_BY_SWIPE_DOWN = "initiatedBySwipeDown";
 
+/**
+ * Controls that do something with Enter of their own: activate, insert a
+ * newline, follow a link, open a disclosure or a file picker.
+ *
+ * Membership is by evidence, not by looking interactive. A plain text input and
+ * a `select` both do nothing with Enter outside a form, and a form is matched
+ * separately, so exempting either would take the key away from the modal and
+ * give it to nothing. Anything whose Enter behaviour has not been confirmed
+ * stays out until it has been.
+ */
+const ENTER_HANDLING_CONTROLS = [
+  "button",
+  "a[href]",
+  "summary",
+  "textarea",
+  'input[type="button"]',
+  'input[type="file"]',
+  'input[type="image"]',
+  'input[type="reset"]',
+  'input[type="submit"]',
+  '[role="button"]',
+  '[contenteditable]:not([contenteditable="false"])',
+].join(", ");
+
+/**
+ * A primary action that cannot be acted on, so there is nothing for Enter to do.
+ *
+ * All three are needed and each misses what the others catch: the attribute is
+ * the only one that sees a button rendered as a link, since `:disabled` applies
+ * to form controls alone; `:disabled` is the only one that sees a control
+ * disabled by an ancestor `fieldset`, which carries no attribute of its own; and
+ * `aria-disabled` is the only one that sees a control kept focusable on purpose.
+ */
+const UNAVAILABLE_PRIMARY = '[disabled], :disabled, [aria-disabled="true"]';
+
 const SWIPE_VELOCITY_THRESHOLD = 0.4;
 const SWIPE_CLOSE_DISTANCE_RATIO = 0.25;
 const SWIPE_SETTLE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
-
-// progressive resistance when the modal is dragged past its resting position
-function dampenedOverdrag(distance: number) {
-  return Math.max(0, 8 * (Math.log(distance + 1) - 2));
-}
 
 // The consumer's close handler. DModal invokes it with an `initiatedBy` reason, but the
 // closers consumers pass (the modal service's `close`, or a float that renders DModal as its
@@ -263,7 +297,7 @@ export default class DModal extends Component<DModalSignature> {
 
   @action
   handleSwipeStart(swipeState: SwipeState, event: Event) {
-    if (this.#shouldDeferSwipeToContent(swipeState)) {
+    if (shouldDeferSwipeToContent(swipeState, this.#modalContainer)) {
       event.preventDefault();
     }
   }
@@ -387,10 +421,20 @@ export default class DModal extends Component<DModalSignature> {
     }
 
     if (event.key === "Enter" && this.#shouldTriggerClickOnEnter(event)) {
-      this._wrapperElement
-        ?.querySelector<HTMLElement>(".d-modal__footer .btn-primary")
-        ?.click();
-      event.preventDefault();
+      // The first primary is the modal's primary action, and stays so whether or
+      // not it can currently act. Excluding unavailable ones in the selector
+      // instead would not find nothing, it would find the NEXT primary along —
+      // which in a footer that pairs a disabled submit with a close button means
+      // Enter closing the modal.
+      const primary = this._wrapperElement?.querySelector<HTMLElement>(
+        ".d-modal__footer .btn-primary"
+      );
+      // Swallowing the key with nothing to submit would suppress whatever the
+      // browser, or the focused control, would otherwise have done with it.
+      if (primary && !primary.matches(UNAVAILABLE_PRIMARY)) {
+        primary.click();
+        event.preventDefault();
+      }
     }
   }
 
@@ -404,59 +448,22 @@ export default class DModal extends Component<DModalSignature> {
       return false;
     }
 
-    // skip when in a form, textarea, or select-kit element
+    // Skip when in a form or a select-kit element, and when focus is on
+    // something that acts on Enter itself: this listens on the document in the
+    // capture phase, so it sees Enter before the focused control does. Without
+    // the exemption, pressing Enter submits the modal out from under whatever
+    // control a keyboard user is standing on, which is never what they asked
+    // for.
     if (
       (event.target as HTMLElement)?.closest("form") ||
       document.activeElement?.closest("form") ||
-      document.activeElement?.nodeName === "TEXTAREA" ||
+      document.activeElement?.closest(ENTER_HANDLING_CONTROLS) ||
       document.activeElement?.closest(".select-kit")
     ) {
       return false;
     }
 
     return true;
-  }
-
-  // lets inner content consume the gesture instead of dragging the modal:
-  // horizontal swipes, and vertical swipes started within scrollable content
-  // that can still scroll in the gesture's direction
-  #shouldDeferSwipeToContent(swipeState: SwipeState) {
-    if (swipeState.direction === "left" || swipeState.direction === "right") {
-      return true;
-    }
-
-    let element = swipeState.originalEvent?.target as HTMLElement | null;
-
-    while (element && element !== this.#modalContainer) {
-      if (element.scrollHeight > element.clientHeight) {
-        const style = window.getComputedStyle(element);
-
-        if (style.overflowY === "auto" || style.overflowY === "scroll") {
-          // column-reverse scrollers (e.g. chat messages) rest at scrollTop 0
-          // and go negative when scrolled back, so normalize scrollTop to a
-          // distance from the top edge before checking for remaining room
-          const maxScroll = element.scrollHeight - element.clientHeight;
-          const reversed =
-            style.display.includes("flex") &&
-            style.flexDirection === "column-reverse";
-          const distanceFromTop = reversed
-            ? maxScroll + element.scrollTop
-            : element.scrollTop;
-
-          if (swipeState.direction === "down" && distanceFromTop > 0) {
-            return true;
-          }
-
-          if (swipeState.direction === "up" && distanceFromTop < maxScroll) {
-            return true;
-          }
-        }
-      }
-
-      element = element.parentElement;
-    }
-
-    return false;
   }
 
   #animateBackdropOpacity(position: number) {
@@ -535,22 +542,28 @@ export default class DModal extends Component<DModalSignature> {
     {{! eslint-disable ember/template-no-invalid-interactive }}
 
     <DConditionalInElement
+      @append={{true}}
       @element={{this.modal.containerElement}}
       @inline={{@inline}}
-      @append={{true}}
     >
       {{#unless @inline}}
         {{htmlClass "modal-open"}}
       {{/unless}}
       <this.dynamicElement
+        {{! The title element lives in the header, so hiding the header leaves this pointing at
+            nothing. A dangling reference is dropped when the accessible name is computed, which
+            leaves the dialog unnamed. Such a modal should supply its own label attribute. }}
+        aria-labelledby={{if
+          (and @title (not @hideHeader))
+          "discourse-modal-title"
+        }}
+        aria-modal="true"
         class={{dConcatClass
           "modal d-modal"
           (if this.animating "is-animating")
         }}
         data-keyboard="false"
-        aria-modal="true"
         role="dialog"
-        aria-labelledby={{if @title "discourse-modal-title"}}
         ...attributes
         {{didInsert this.setupModal}}
         {{willDestroy this.cleanupModal}}
@@ -596,10 +609,10 @@ export default class DModal extends Component<DModalSignature> {
               }}
                 <div class="d-modal__dismiss-action">
                   <DButton
-                    @label="cancel"
-                    @action={{this.handleCloseButton}}
-                    @title="modal.close"
                     class="btn-transparent d-modal__dismiss-action-button"
+                    @action={{this.handleCloseButton}}
+                    @label="cancel"
+                    @title="modal.close"
                   />
                 </div>
               {{/if}}
@@ -607,8 +620,8 @@ export default class DModal extends Component<DModalSignature> {
               {{#if @title}}
                 <div class="d-modal__title">
                   <h1
-                    id="discourse-modal-title"
                     class="d-modal__title-text"
+                    id="discourse-modal-title"
                   >{{@title}}</h1>
 
                   {{#if @subtitle}}
@@ -628,10 +641,10 @@ export default class DModal extends Component<DModalSignature> {
                 </div>
               {{else if this.dismissable}}
                 <DButton
-                  @icon="xmark"
-                  @action={{this.handleCloseButton}}
-                  @title="modal.close"
                   class="btn-transparent modal-close"
+                  @action={{this.handleCloseButton}}
+                  @icon="xmark"
+                  @title="modal.close"
                 />
               {{/if}}
             </div>

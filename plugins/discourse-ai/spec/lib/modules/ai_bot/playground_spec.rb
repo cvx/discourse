@@ -69,6 +69,16 @@ RSpec.describe DiscourseAi::AiBot::Playground do
     AiAgent.agent_cache.flush!
   end
 
+  describe "#title_playground with a multipart model response" do
+    it "updates the topic title when the LLM returns multiple text blocks" do
+      DiscourseAi::Completions::Llm.with_prepared_responses(
+        [["A concise ", "conversation title"]],
+      ) { playground.title_playground(second_post, user) }
+
+      expect(pm.reload.title).to eq("A concise conversation title")
+    end
+  end
+
   describe "is_bot_user_id?" do
     it "properly detects ALL bots as bot users" do
       agent = Fabricate(:ai_agent, enabled: false)
@@ -196,6 +206,34 @@ RSpec.describe DiscourseAi::AiBot::Playground do
       thinking = PostCustomPrompt.find_by(post_id: reply_post.id).custom_prompt.first[4]
       expect(thinking["message"]).to eq(
         "Web search: Anthropic AI news 2026\n\nWeb search: OpenAI AI news 2026",
+      )
+    end
+
+    it "closes a fenced thinking block before rendering visible content" do
+      ai_agent.update!(show_thinking: true)
+      agent_klass = AiAgent.all_agents.find { |agent_class| agent_class.name == ai_agent.name }
+      bot = DiscourseAi::Agents::Bot.as(bot_user, agent: agent_klass.new)
+      playground = described_class.new(bot)
+      responses = [
+        [
+          DiscourseAi::Completions::Thinking.new(
+            message: "Code execution:\n\n```python\nprint(42)\n```",
+          ),
+          "![image](https://example.com/image.png)",
+        ],
+      ]
+
+      reply_post = nil
+      DiscourseAi::Completions::Llm.with_prepared_responses(responses) do
+        new_post = Fabricate(:post, raw: "Render a chart")
+        reply_post = playground.reply_to(new_post)
+      end
+
+      expect(reply_post.raw).to include(
+        "```python\nprint(42)\n```\n</details>\n\n![image](https://example.com/image.png)",
+      )
+      expect(reply_post.cooked).to include(
+        "</code></pre>\n</details>\n<p><img src=\"https://example.com/image.png\"",
       )
     end
 
@@ -378,7 +416,7 @@ RSpec.describe DiscourseAi::AiBot::Playground do
         agent.update!(allow_chat_channel_mentions: true, default_llm_id: opus_model.id)
       end
 
-      it "should behave in a sane way when threading is enabled" do
+      it "creates the reply correctly when threading is enabled" do
         channel.update!(threading_enabled: true)
 
         message =
@@ -452,7 +490,7 @@ RSpec.describe DiscourseAi::AiBot::Playground do
         expect(reply.message).to eq("world")
       end
 
-      it "should reply to a mention if properly enabled" do
+      it "replies to a mention when enabled" do
         prompts = nil
 
         ChatSDK::Message.create(
@@ -682,6 +720,10 @@ RSpec.describe DiscourseAi::AiBot::Playground do
         first_target = Fabricate(:user)
         second_target = Fabricate(:user)
         agent.update!(tools: ["SuspendUser"], require_approval: true)
+        DiscourseAi::Agents::Agent
+          .any_instance
+          .stubs(:stop_chain_on_pending_approval?)
+          .returns(true)
 
         first_tool_call =
           DiscourseAi::Completions::ToolCall.new(
@@ -714,6 +756,13 @@ RSpec.describe DiscourseAi::AiBot::Playground do
           Chat::Message.where(chat_channel: dm_channel).where.not(blocks: nil).order(:id)
         reviewable_ids = ReviewableAiToolAction.order(:id).last(2).map(&:id)
 
+        expect(approval_messages.count).to eq(2)
+        expect(
+          Chat::Message.exists?(
+            chat_channel: dm_channel,
+            message: "Both actions are awaiting approval.",
+          ),
+        ).to eq(false)
         expect(
           approval_messages.map do |approval_message|
             approval_message.blocks.first["elements"].map { |element| element["action_id"] }
@@ -827,14 +876,15 @@ RSpec.describe DiscourseAi::AiBot::Playground do
       expect(last_post.post_type).to eq(Post.types[:whisper])
     end
 
-    it "allows mentioning a agent" do
+    it "allows mentioning an agent that inherits the site default LLM" do
       # we still should be able to mention with no bots
       toggle_enabled_bots(bots: [])
 
-      agent.update!(allow_topic_mentions: true)
+      global_llm = assign_fake_provider_to(:ai_default_llm_model)
+      agent.update!(allow_topic_mentions: true, default_llm: nil)
 
       post = nil
-      DiscourseAi::Completions::Llm.with_prepared_responses(["Yes I can"]) do
+      DiscourseAi::Completions::Llm.with_prepared_responses(["Yes I can"], llm: global_llm) do
         post =
           create_post(
             user: admin,
@@ -1082,6 +1132,80 @@ RSpec.describe DiscourseAi::AiBot::Playground do
         expect(pm.reload.title).to eq(expected_response)
       end
     end
+
+    it "falls back to an excerpt of the first post when the model returns nothing" do
+      DiscourseAi::Completions::Llm.with_prepared_responses([""]) do
+        playground.title_playground(third_post, user)
+      end
+
+      expect(pm.reload.title).to eq(first_post.raw)
+    end
+
+    it "truncates a title the model returns too long to be valid" do
+      long_title = "word " * 100
+
+      DiscourseAi::Completions::Llm.with_prepared_responses([long_title]) do
+        playground.title_playground(third_post, user)
+      end
+
+      expect(pm.reload.title.length).to be <= SiteSetting.max_topic_title_length
+      expect(pm.reload.title.downcase).to start_with("word word")
+    end
+
+    it "does not announce a title that was not saved" do
+      PostRevisor.any_instance.stubs(:revise!).returns(false)
+
+      messages =
+        MessageBus.track_publish("/discourse-ai/ai-bot/topic-titles") do
+          DiscourseAi::Completions::Llm.with_prepared_responses([expected_response]) do
+            playground.title_playground(third_post, user)
+          end
+        end
+
+      expect(messages).to be_empty
+      expect(pm.reload.title).to eq("This is my special PM")
+    end
+
+    it "logs and swallows errors instead of propagating them to the caller" do
+      PostRevisor.any_instance.stubs(:revise!).raises(StandardError.new("boom"))
+      Discourse.expects(:warn_exception).once
+
+      DiscourseAi::Completions::Llm.with_prepared_responses([expected_response]) do
+        expect { playground.title_playground(third_post, user) }.to_not raise_error
+      end
+    end
+
+    context "when the bot user's daily edit allowance is exhausted" do
+      fab!(:agent) { Fabricate(:ai_agent, enabled: false) }
+      fab!(:agent_user) { agent.create_user! }
+
+      let(:agent_playground) do
+        described_class.new(
+          DiscourseAi::Agents::Bot.as(agent_user, agent: agent.class_instance.new, model: claude_2),
+        )
+      end
+
+      before do
+        RateLimiter.enable
+        SiteSetting.editing_grace_period = 0
+        SiteSetting.max_edits_per_day = 1
+        SiteSetting.tl4_additional_edits_per_day_multiplier = 1
+      end
+
+      it "still updates the title" do
+        expect(agent_user.trust_level).to eq(TrustLevel[4])
+        expect(agent_user.staff?).to eq(false)
+
+        scratch_post = Fabricate(:post, user: agent_user)
+        PostRevisor.new(scratch_post).revise!(agent_user, raw: "using up the daily allowance")
+
+        DiscourseAi::Completions::Llm.with_prepared_responses([expected_response]) do
+          agent_playground.title_playground(third_post, user)
+        end
+
+        expect(pm.reload.title).to eq(expected_response)
+      end
+    end
   end
 
   describe "#reply_to" do
@@ -1175,6 +1299,53 @@ RSpec.describe DiscourseAi::AiBot::Playground do
           expect(expected_bot_response.start_with?(m.data[:raw])).to eq(true)
         end
       end
+    end
+
+    it "only streams the reply to the PM's participants" do
+      messages =
+        DiscourseAi::Completions::Llm.with_prepared_responses(["the secret bot reply"]) do
+          MessageBus.track_publish("discourse-ai/ai-bot/topic/#{pm.id}") do
+            playground.reply_to(third_post)
+          end
+        end
+
+      message = messages.first
+      expect(message.user_ids).to contain_exactly(user.id, bot_user.id)
+      expect(message.group_ids).to be_nil
+    end
+
+    it "streams the reply to a participant authorized through an allowed group" do
+      group = Fabricate(:group)
+      group_pm =
+        Fabricate(
+          :private_message_topic,
+          user: user,
+          topic_allowed_users: [
+            Fabricate.build(:topic_allowed_user, user: user),
+            Fabricate.build(:topic_allowed_user, user: bot_user),
+          ],
+          topic_allowed_groups: [Fabricate.build(:topic_allowed_group, group: group)],
+        )
+      Fabricate(:post, topic: group_pm, user: user, post_number: 1, raw: "group opening message")
+      group_post =
+        Fabricate(
+          :post,
+          topic: group_pm,
+          user: user,
+          post_number: 2,
+          raw: "a private group question",
+        )
+
+      messages =
+        DiscourseAi::Completions::Llm.with_prepared_responses(["a reply to the group"]) do
+          MessageBus.track_publish("discourse-ai/ai-bot/topic/#{group_pm.id}") do
+            playground.reply_to(group_post)
+          end
+        end
+
+      message = messages.first
+      expect(message.user_ids).to contain_exactly(user.id, bot_user.id)
+      expect(message.group_ids).to contain_exactly(group.id)
     end
 
     it "supports multiple function calls" do
@@ -1340,7 +1511,7 @@ RSpec.describe DiscourseAi::AiBot::Playground do
   describe "#canceling a completions" do
     after { DiscourseAi::AiBot::PostStreamer.on_callback = nil }
 
-    it "should be able to cancel a completion halfway through" do
+    it "cancels a completion halfway through" do
       body = <<~STRING.strip
       event: message_start
       data: {"type": "message_start", "message": {"id": "msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY", "type": "message", "role": "assistant", "content": [], "model": "claude-3-opus-20240229", "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 25, "output_tokens": 1}}}
