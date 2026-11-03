@@ -4,6 +4,7 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { trustHTML } from "@ember/template";
+import AdminMcp from "discourse/admin/components/admin-mcp";
 import IpLookupAccountsTable from "discourse/admin/components/ip-lookup-accounts-table";
 import AdminUser from "discourse/admin/models/admin-user";
 import { ajax } from "discourse/lib/ajax";
@@ -14,6 +15,9 @@ import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
 
 const MAX_ACCOUNTS_TO_DELETE = 50;
+
+// eslint-disable-next-line no-console
+console.log(AdminMcp);
 
 export default class ReviewableIpLookup extends Component {
   @service currentUser;
